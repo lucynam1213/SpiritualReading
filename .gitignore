@@ -1,0 +1,18 @@
+# Local secrets — NEVER commit
+.env
+.env.local
+.env.*.local
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Sandbox tempfiles written by scripts/generate-audio.js
+spiritual-reading-sandbox-*.js
