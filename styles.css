@@ -29,6 +29,101 @@ body {
   display: flex;
   flex-direction: column;
   gap: 20px;
+  position: relative;            /* anchor for floating .tts-controls */
+}
+
+/* ── TTS floating controls ── */
+.tts-controls {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: flex;
+  gap: 6px;
+  z-index: 5;
+}
+
+.tts-controls[hidden] { display: none; }
+
+.tts-btn {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 12px;
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tts-btn:hover:not(:disabled),
+.tts-btn:active:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.tts-btn.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.tts-btn:disabled {
+  opacity: 0.32;
+  cursor: default;
+}
+
+/* Pulsing dot next to the chapter title that's currently being read */
+.chapter-title.is-speaking::before {
+  content: '◉';
+  color: var(--accent);
+  margin-right: 8px;
+  font-size: 0.7em;
+  animation: tts-pulse 1.4s ease-in-out infinite;
+}
+
+/* TOC entry highlight when its chapter is being read */
+.toc-entry.is-speaking .toc-entry-title {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.toc-entry.is-speaking .toc-page-num::before {
+  content: '◉ ';
+  color: var(--accent);
+  animation: tts-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes tts-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.25; }
+}
+
+/* Fallback toast (e.g. when no Korean voice is installed) */
+.tts-toast {
+  position: fixed;
+  bottom: 88px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--text);
+  color: var(--card-bg);
+  padding: 10px 18px;
+  border-radius: 4px;
+  font-size: 14px;
+  max-width: 88%;
+  text-align: center;
+  z-index: 100;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.2);
+  animation: tts-toast-fade 3s ease-in-out forwards;
+}
+
+@keyframes tts-toast-fade {
+  0%        { opacity: 0; transform: translate(-50%, 10px); }
+  10%, 80%  { opacity: 1; transform: translate(-50%, 0); }
+  100%      { opacity: 0; transform: translate(-50%, -10px); }
 }
 
 /* ── Book card ── */
@@ -343,6 +438,21 @@ body {
     padding: 40px 24px;
     justify-content: center;
     overflow: hidden;
+  }
+
+  /* ── TTS controls: smaller, tighter to the corner on mobile ── */
+  .tts-controls {
+    top: 8px;
+    right: 8px;
+    gap: 4px;
+  }
+
+  .tts-btn {
+    width: 34px;
+    height: 34px;
+    min-width: 34px;
+    min-height: 34px;
+    font-size: 11px;
   }
 
   .cover-genre {

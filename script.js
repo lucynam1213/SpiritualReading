@@ -275,6 +275,7 @@ function buildPages() {
         sectionTitle: section.title,
         sectionType:  section.type,
         chapterNum:   section.chapterNum,
+        sectionIdx:   i,                     // for TTS "now playing" highlight
         pageIdx: sectionStartIndices[i] + 1  // +1 for TOC page inserted at index 1
       };
     })
@@ -316,6 +317,7 @@ function renderPage(idx) {
     }
 
     applyFontSize();
+    updateTtsForPage();   // refresh TTS button visibility + speaking indicator
     card.style.opacity = '1';
   }, 180);
 
@@ -349,7 +351,7 @@ function renderToc(card, page) {
   const chapterEntries = page.tocEntries.filter(e => e.sectionType === 'chapter');
 
   const frontHtml = frontEntries.map(e => `
-    <div class="toc-entry" data-page="${e.pageIdx}">
+    <div class="toc-entry" data-page="${e.pageIdx}" data-section="${e.sectionIdx}">
       <span class="toc-ch"></span>
       <span class="toc-entry-title is-front">${e.sectionTitle}</span>
       <span class="toc-page-num">${e.pageIdx + 1}</span>
@@ -357,7 +359,7 @@ function renderToc(card, page) {
   `).join('');
 
   const chapterHtml = chapterEntries.map(e => `
-    <div class="toc-entry" data-page="${e.pageIdx}">
+    <div class="toc-entry" data-page="${e.pageIdx}" data-section="${e.sectionIdx}">
       <span class="toc-ch">Ch.${e.chapterNum}</span>
       <span class="toc-entry-title">${e.sectionTitle}</span>
       <span class="toc-page-num">${e.pageIdx + 1}</span>
@@ -474,3 +476,237 @@ window.addEventListener('resize', () => {
     renderPage(Math.min(saved, allPages.length - 1));
   }, 300);
 });
+
+// ============================================================
+// TEXT-TO-SPEECH (Web Speech API, ko-KR)
+// Reads the full chapter that contains the current page.
+// Picks a Korean voice; prefers warm, female-sounding presets
+// when available. No specific person's voice is cloned.
+// ============================================================
+
+const TTS_LANG = 'ko-KR';
+
+// Voice names that tend to be warm Korean female narrators across
+// common platforms. We probe by substring, in priority order.
+const TTS_PREFERRED_VOICES = [
+  'Yuna',                // Apple (iOS / macOS) Korean female
+  'Heami',               // Microsoft Korean (Edge) — female
+  'Sun-Hi',              // Microsoft Korean (older) — female
+  'Google 한국의',        // Chrome desktop — Korean
+  'Korean (South Korea)' // generic fallback label
+];
+
+let ttsVoice = null;
+let ttsState = 'idle';      // 'idle' | 'playing' | 'paused'
+let ttsSectionIdx = -1;     // section currently being spoken
+let ttsQueueLen = 0;        // remaining utterances in the current chapter
+let ttsToastTimer = null;
+
+function ttsSupported() {
+  return typeof window !== 'undefined' && 'speechSynthesis' in window;
+}
+
+function pickKoreanVoice() {
+  if (!ttsSupported()) return null;
+  const voices = window.speechSynthesis.getVoices() || [];
+  if (!voices.length) return null;
+  const koVoices = voices.filter(v => v.lang && v.lang.toLowerCase().startsWith('ko'));
+  if (!koVoices.length) return null;
+  for (const name of TTS_PREFERRED_VOICES) {
+    const match = koVoices.find(v => v.name && v.name.indexOf(name) !== -1);
+    if (match) return match;
+  }
+  return koVoices[0];
+}
+
+function initTts() {
+  if (!ttsSupported()) {
+    const ctrl = document.getElementById('ttsControls');
+    if (ctrl) ctrl.style.display = 'none';
+    return;
+  }
+  ttsVoice = pickKoreanVoice();
+  // On Chrome/Edge the voice list loads asynchronously
+  window.speechSynthesis.addEventListener('voiceschanged', () => {
+    ttsVoice = pickKoreanVoice();
+  });
+
+  document.getElementById('ttsPlayBtn').addEventListener('click', ttsTogglePlay);
+  document.getElementById('ttsStopBtn').addEventListener('click', ttsStop);
+
+  // Cancel any in-flight speech if the page is unloaded
+  window.addEventListener('beforeunload', () => {
+    try { window.speechSynthesis.cancel(); } catch (_) {}
+  });
+}
+
+// Split chapter text into sentence-sized chunks. Speaking many short
+// utterances is more reliable than one giant one (Chrome cuts off long
+// utterances, and chunks let us start playback faster).
+function splitIntoSentences(text) {
+  const cleaned = text.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
+  const matches = cleaned.match(/[^.?!。？！]+[.?!。？！]+|[^.?!。？！]+$/g);
+  if (!matches) return [cleaned];
+  return matches.map(s => s.trim()).filter(s => s.length > 0);
+}
+
+function getCurrentChapterSection() {
+  const page = allPages[currentPage];
+  if (!page || page.sectionIdx == null) return null;
+  const section = sections[page.sectionIdx];
+  if (!section) return null;
+  if (section.type !== 'chapter' && section.type !== 'front') return null;
+  return { section, idx: page.sectionIdx };
+}
+
+function speakSection(idx) {
+  const section = sections[idx];
+  if (!section) return;
+  const sentences = splitIntoSentences(section.content);
+  if (!sentences.length) return;
+
+  ttsQueueLen = sentences.length;
+
+  sentences.forEach((sentence, i) => {
+    const u = new SpeechSynthesisUtterance(sentence);
+    u.voice  = ttsVoice;
+    u.lang   = TTS_LANG;
+    u.rate   = 0.92;   // a touch slower for a calm narration feel
+    u.pitch  = 1.05;   // slight lift; sounds gentler
+    u.volume = 1.0;
+
+    u.addEventListener('end', () => {
+      ttsQueueLen = Math.max(0, ttsQueueLen - 1);
+      if (ttsQueueLen === 0) {
+        ttsState = 'idle';
+        ttsSectionIdx = -1;
+        updateTtsForPage();
+      }
+    });
+    u.addEventListener('error', () => {
+      ttsQueueLen = 0;
+      ttsState = 'idle';
+      ttsSectionIdx = -1;
+      updateTtsForPage();
+    });
+
+    window.speechSynthesis.speak(u);
+  });
+}
+
+function ttsTogglePlay() {
+  if (!ttsSupported()) {
+    showTtsToast('이 브라우저는 음성 합성을 지원하지 않습니다.');
+    return;
+  }
+
+  const here = getCurrentChapterSection();
+  if (!here) return;   // not a chapter / front-matter page
+
+  // Already playing or paused
+  if (ttsState !== 'idle') {
+    // If user clicked play on a different chapter, switch to it
+    if (ttsSectionIdx !== here.idx) {
+      ttsStop();
+      // fall through to start fresh on the new chapter
+    } else if (ttsState === 'playing') {
+      window.speechSynthesis.pause();
+      ttsState = 'paused';
+      updateTtsForPage();
+      return;
+    } else if (ttsState === 'paused') {
+      window.speechSynthesis.resume();
+      ttsState = 'playing';
+      updateTtsForPage();
+      return;
+    }
+  }
+
+  // Start fresh
+  if (!ttsVoice) ttsVoice = pickKoreanVoice();
+  if (!ttsVoice) {
+    showTtsToast('현재 브라우저에 한국어 음성이 설치되어 있지 않습니다.');
+    return;
+  }
+
+  try { window.speechSynthesis.cancel(); } catch (_) {}
+  ttsSectionIdx = here.idx;
+  ttsState = 'playing';
+  speakSection(here.idx);
+  updateTtsForPage();
+}
+
+function ttsStop() {
+  if (!ttsSupported()) return;
+  try { window.speechSynthesis.cancel(); } catch (_) {}
+  ttsState = 'idle';
+  ttsSectionIdx = -1;
+  ttsQueueLen = 0;
+  updateTtsForPage();
+}
+
+// Refreshes button visibility, button icons, and the "speaking" indicator
+// on the chapter title / TOC entry. Called after each renderPage().
+function updateTtsForPage() {
+  const ctrl    = document.getElementById('ttsControls');
+  const playBtn = document.getElementById('ttsPlayBtn');
+  const stopBtn = document.getElementById('ttsStopBtn');
+  if (!ctrl || !playBtn || !stopBtn) return;
+
+  const page = allPages[currentPage];
+  const showFor = ttsSupported() && page &&
+                  (page.sectionType === 'chapter' || page.sectionType === 'front');
+  ctrl.hidden = !showFor;
+
+  // Button icons + states
+  if (ttsState === 'playing') {
+    playBtn.innerHTML = '&#10074;&#10074;';   // ❚❚ pause
+    playBtn.classList.add('is-active');
+    playBtn.setAttribute('aria-label', '일시정지');
+    stopBtn.disabled = false;
+  } else if (ttsState === 'paused') {
+    playBtn.innerHTML = '&#9654;';             // ▶ resume
+    playBtn.classList.add('is-active');
+    playBtn.setAttribute('aria-label', '이어서 재생');
+    stopBtn.disabled = false;
+  } else {
+    playBtn.innerHTML = '&#9654;';             // ▶ play
+    playBtn.classList.remove('is-active');
+    playBtn.setAttribute('aria-label', '음성으로 듣기');
+    stopBtn.disabled = true;
+  }
+
+  // Speaking indicator on the visible chapter title
+  const titleEl = document.querySelector('.book-card .chapter-title');
+  if (titleEl) {
+    const isCurrent = page && page.sectionIdx === ttsSectionIdx && ttsState !== 'idle';
+    titleEl.classList.toggle('is-speaking', !!isCurrent);
+  }
+
+  // Speaking indicator in the TOC list (when visible)
+  document.querySelectorAll('.toc-entry').forEach(el => {
+    const sIdx = parseInt(el.dataset.section, 10);
+    el.classList.toggle('is-speaking',
+      Number.isFinite(sIdx) && sIdx === ttsSectionIdx && ttsState !== 'idle');
+  });
+}
+
+function showTtsToast(message) {
+  const existing = document.getElementById('ttsToast');
+  if (existing) existing.remove();
+  if (ttsToastTimer) { clearTimeout(ttsToastTimer); ttsToastTimer = null; }
+
+  const toast = document.createElement('div');
+  toast.id = 'ttsToast';
+  toast.className = 'tts-toast';
+  toast.textContent = message;
+  document.body.appendChild(toast);
+
+  ttsToastTimer = setTimeout(() => {
+    toast.remove();
+    ttsToastTimer = null;
+  }, 3000);
+}
+
+initTts();
+updateTtsForPage();
