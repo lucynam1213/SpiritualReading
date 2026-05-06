@@ -13,10 +13,8 @@
   <div class="reader-wrapper">
     <div class="book-card" id="bookCard"></div>
     <div class="tts-controls" id="ttsControls" hidden>
-      <select class="tts-voice-select" id="ttsVoiceSelect" aria-label="음성 선택" title="음성 선택" hidden></select>
       <button class="btn tts-btn" id="ttsPlayBtn" aria-label="음성으로 듣기" title="재생 / 일시정지">&#9654;</button>
       <button class="btn tts-btn" id="ttsStopBtn" aria-label="음성 정지" title="정지" disabled>&#9632;</button>
-      <button class="btn tts-btn tts-settings-btn" id="ttsSettingsBtn" aria-label="음성 설정" title="음성 설정">&#9881;</button>
     </div>
     <div class="controls">
       <div class="nav-group">
@@ -32,41 +30,6 @@
     </div>
   </div>
   <audio id="ttsAudio" preload="auto"></audio>
-
-  <div class="tts-settings-modal" id="ttsSettingsModal" hidden>
-    <div class="tts-settings-backdrop" id="ttsSettingsBackdrop"></div>
-    <div class="tts-settings-dialog" role="dialog" aria-labelledby="ttsSettingsTitle">
-      <h3 class="tts-settings-title" id="ttsSettingsTitle">음성 설정</h3>
-
-      <div class="tts-settings-row">
-        <label for="ttsProviderSelect">음성 엔진</label>
-        <select id="ttsProviderSelect">
-          <option value="browser">브라우저 기본 음성 (무료)</option>
-          <option value="elevenlabs">ElevenLabs (AI 음성)</option>
-        </select>
-      </div>
-
-      <div class="tts-settings-row tts-elevenlabs-only">
-        <label for="ttsApiKeyInput">ElevenLabs API 키</label>
-        <input type="password" id="ttsApiKeyInput" autocomplete="off" spellcheck="false" placeholder="xi-api-key">
-      </div>
-
-      <div class="tts-settings-row tts-elevenlabs-only">
-        <label for="ttsVoiceIdInput">Voice ID</label>
-        <input type="text" id="ttsVoiceIdInput" autocomplete="off" spellcheck="false" placeholder="nPczCjzI2devNBz1zQrb">
-      </div>
-
-      <p class="tts-settings-note">
-        API 키는 이 브라우저에만 저장되며 외부 서버로 전송되지 않습니다.
-        ElevenLabs 다국어 모델로 한국어를 자연스럽게 읽어줍니다.
-      </p>
-
-      <div class="tts-settings-actions">
-        <button class="btn tts-settings-cancel" id="ttsSettingsCancel">취소</button>
-        <button class="btn tts-settings-save" id="ttsSettingsSave">저장</button>
-      </div>
-    </div>
-  </div>
 
   <script src="script.js"></script>
 </body>

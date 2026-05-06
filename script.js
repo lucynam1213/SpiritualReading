@@ -571,28 +571,11 @@ async function getStaticAudioUrl(sIdx) {
   return null;
 }
 
-function loadTtsSettings() {
-  try {
-    ttsProvider   = localStorage.getItem('ebook_tts_provider')          || 'browser';
-    ttsApiKey     = localStorage.getItem('ebook_tts_elevenlabs_key')    || '';
-    ttsApiVoiceId = localStorage.getItem('ebook_tts_elevenlabs_voice')  || TTS_API_DEFAULTS.voiceId;
-  } catch (_) { /* private mode etc. */ }
-  if (ttsProvider !== 'elevenlabs') ttsProvider = 'browser';
-}
-
-function saveTtsSettings(provider, apiKey, voiceId) {
-  ttsProvider   = provider === 'elevenlabs' ? 'elevenlabs' : 'browser';
-  ttsApiKey     = apiKey || '';
-  ttsApiVoiceId = (voiceId || '').trim() || TTS_API_DEFAULTS.voiceId;
-  try {
-    localStorage.setItem('ebook_tts_provider',         ttsProvider);
-    localStorage.setItem('ebook_tts_elevenlabs_key',   ttsApiKey);
-    localStorage.setItem('ebook_tts_elevenlabs_voice', ttsApiVoiceId);
-  } catch (_) {}
-}
-
-// True when the user has opted into the AI engine *and* supplied the
-// minimum required credentials. Anything else falls back to the browser.
+// True when the runtime should call the ElevenLabs API for missing
+// chapters. Always false now that the settings UI is gone — the live
+// API path stays intact in the engine, but is unreachable from the UI.
+// Pre-generated MP3s under audio/{i}.mp3 cover playback; chapters
+// without a static file fall back to the browser TTS engine.
 function isApiEngineActive() {
   return ttsProvider === 'elevenlabs' && !!ttsApiKey && !!ttsApiVoiceId;
 }
@@ -740,145 +723,25 @@ function pickKoreanVoice() {
 }
 
 function initTts() {
-  loadTtsSettings();
   ensureAudioEl();
 
-  // The floating bar is useful even when the browser engine is missing,
-  // because the user might still configure ElevenLabs from settings.
-  // We only fully hide it when *neither* engine could ever work.
-  const browserAvailable = ttsSupported();
-  const ctrl = document.getElementById('ttsControls');
-  if (!browserAvailable && !isApiEngineActive() && ctrl) {
-    // Keep the settings button reachable so the user can flip on the API.
-    // The play / stop / voice picker will just stay disabled / hidden.
-  }
-
-  // Browser-engine voices (used when provider === 'browser')
-  if (browserAvailable) {
+  // Browser-engine voice fallback for chapters without a pre-generated
+  // MP3. The voice is auto-picked (no UI for selection); we just keep
+  // it fresh whenever the OS voice list updates asynchronously.
+  if (ttsSupported()) {
     ttsVoice = pickKoreanVoice();
-    applySavedVoicePreference();
-    populateVoiceSelect();
     window.speechSynthesis.addEventListener('voiceschanged', () => {
       ttsVoice = pickKoreanVoice();
-      applySavedVoicePreference();
-      populateVoiceSelect();
     });
   }
 
   document.getElementById('ttsPlayBtn').addEventListener('click', ttsTogglePlay);
   document.getElementById('ttsStopBtn').addEventListener('click', ttsStop);
 
-  const voiceSel = document.getElementById('ttsVoiceSelect');
-  if (voiceSel && browserAvailable) {
-    voiceSel.addEventListener('change', (e) => {
-      const voices = window.speechSynthesis.getVoices() || [];
-      const chosen = voices.find(v => v.name === e.target.value);
-      if (chosen) {
-        ttsVoice = chosen;
-        try { localStorage.setItem('ebook_tts_voice', chosen.name); } catch (_) {}
-      }
-    });
-  }
-
-  initTtsSettingsDialog();
-
   // Cancel any in-flight speech / audio if the page is unloaded
   window.addEventListener('beforeunload', () => {
     ttsCancelAll();
   });
-}
-
-// ── Settings dialog ───────────────────────────────────────────
-function initTtsSettingsDialog() {
-  const openBtn   = document.getElementById('ttsSettingsBtn');
-  const modal     = document.getElementById('ttsSettingsModal');
-  const backdrop  = document.getElementById('ttsSettingsBackdrop');
-  const cancelBtn = document.getElementById('ttsSettingsCancel');
-  const saveBtn   = document.getElementById('ttsSettingsSave');
-  const provSel   = document.getElementById('ttsProviderSelect');
-  const keyInput  = document.getElementById('ttsApiKeyInput');
-  const voiceInput= document.getElementById('ttsVoiceIdInput');
-  if (!openBtn || !modal || !provSel) return;
-
-  function reflectProvider() {
-    modal.classList.toggle('is-browser', provSel.value !== 'elevenlabs');
-  }
-
-  function openModal() {
-    provSel.value   = ttsProvider;
-    keyInput.value  = ttsApiKey;
-    voiceInput.value = ttsApiVoiceId === TTS_API_DEFAULTS.voiceId ? '' : ttsApiVoiceId;
-    voiceInput.placeholder = TTS_API_DEFAULTS.voiceId;
-    reflectProvider();
-    modal.hidden = false;
-    setTimeout(() => keyInput.focus(), 50);
-  }
-  function closeModal() { modal.hidden = true; }
-
-  openBtn.addEventListener('click', openModal);
-  cancelBtn.addEventListener('click', closeModal);
-  backdrop.addEventListener('click', closeModal);
-  provSel.addEventListener('change', reflectProvider);
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !modal.hidden) closeModal();
-  });
-
-  saveBtn.addEventListener('click', () => {
-    const newProvider = provSel.value;
-    const newKey      = keyInput.value.trim();
-    const newVoice    = voiceInput.value.trim();
-    // Cancel any in-flight playback so the new engine starts clean
-    ttsStop();
-    saveTtsSettings(newProvider, newKey, newVoice);
-    // Engine change invalidates already-cached audio (different voice)
-    ttsClearAudioCache();
-    closeModal();
-    updateTtsForPage();
-    if (newProvider === 'elevenlabs' && !newKey) {
-      showTtsToast('ElevenLabs API 키를 입력해 주세요.');
-    } else if (newProvider === 'elevenlabs') {
-      showTtsToast('AI 음성으로 전환되었습니다.');
-    } else {
-      showTtsToast('브라우저 음성으로 전환되었습니다.');
-    }
-  });
-}
-
-function ttsClearAudioCache() {
-  ttsAudioCache.forEach((url) => { try { URL.revokeObjectURL(url); } catch (_) {} });
-  ttsAudioCache.clear();
-}
-
-function applySavedVoicePreference() {
-  let savedName = null;
-  try { savedName = localStorage.getItem('ebook_tts_voice'); } catch (_) {}
-  if (!savedName || !ttsSupported()) return;
-  const voices = window.speechSynthesis.getVoices() || [];
-  const match = voices.find(v => v.name === savedName);
-  if (match) ttsVoice = match;
-}
-
-function populateVoiceSelect() {
-  const sel = document.getElementById('ttsVoiceSelect');
-  if (!sel || !ttsSupported()) return;
-  const voices = window.speechSynthesis.getVoices() || [];
-  const koVoices = voices.filter(v => v.lang && v.lang.toLowerCase().startsWith('ko'));
-
-  // Only show the picker when there's an actual choice to make
-  if (koVoices.length < 2) {
-    sel.hidden = true;
-    sel.innerHTML = '';
-    return;
-  }
-
-  const currentName = ttsVoice && ttsVoice.name;
-  sel.innerHTML = koVoices.map(v => {
-    const isSel = v.name === currentName ? ' selected' : '';
-    // Strip noisy suffixes like "(Natural)" / "Online (Natural)" for compactness
-    const label = v.name.replace(/Microsoft\s+/, '').replace(/\s+Online.*$/, '');
-    return `<option value="${v.name}"${isSel}>${label}</option>`;
-  }).join('');
-  sel.hidden = false;
 }
 
 // Split chapter text into sentence-sized chunks. Speaking many short
@@ -1096,27 +959,17 @@ function updateTtsForPage() {
   const ctrl     = document.getElementById('ttsControls');
   const playBtn  = document.getElementById('ttsPlayBtn');
   const stopBtn  = document.getElementById('ttsStopBtn');
-  const voiceSel = document.getElementById('ttsVoiceSelect');
   if (!ctrl || !playBtn || !stopBtn) return;
 
   const page = allPages[currentPage] || {};
   const isReadingPage = page.sectionType === 'chapter' || page.sectionType === 'front';
-  const isTocVisible  = !!page.isToc;
   const isSpeaking    = ttsState !== 'idle';
   const isLoading     = ttsLoadingSection !== -1;
 
-  // Show the floating bar on chapter / front-matter pages always; on the
-  // TOC page show it too (for the voice picker + global stop while playing).
-  ctrl.hidden = !(isReadingPage || isTocVisible);
-
-  // The global play/pause button is only useful on a reading page —
-  // on the TOC, per-chapter play buttons handle starting playback.
-  playBtn.style.display = isTocVisible ? 'none' : '';
-
-  // Hide the browser-voice picker when the API engine is in charge —
-  // it has no effect on AI playback. populateVoiceSelect() controls
-  // visibility otherwise (only shows when ≥2 ko voices are installed).
-  if (voiceSel && isApiEngineActive()) voiceSel.hidden = true;
+  // Show the floating play / stop bar on chapter & front-matter pages
+  // only. On the cover and the TOC the bar is hidden — per-chapter
+  // play buttons in the TOC handle starting playback there.
+  ctrl.hidden = !isReadingPage;
 
   // Loading spinner on the global button when fetching audio for the
   // chapter that's actually visible. (For other chapters we surface the

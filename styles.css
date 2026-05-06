@@ -76,29 +76,6 @@ body {
   cursor: default;
 }
 
-/* Voice picker (native <select>, only shown when ≥2 ko voices exist) */
-.tts-voice-select {
-  height: 36px;
-  padding: 0 26px 0 12px;
-  background: var(--card-bg);
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  color: var(--text);
-  font-family: inherit;
-  font-size: 11px;
-  letter-spacing: 0.02em;
-  max-width: 160px;
-  cursor: pointer;
-  appearance: none;
-  -webkit-appearance: none;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%239e8c70' d='M0 0l5 6 5-6z'/></svg>");
-  background-repeat: no-repeat;
-  background-position: right 10px center;
-}
-
-.tts-voice-select:focus { outline: none; border-color: var(--accent); }
-.tts-voice-select[hidden] { display: none; }
-
 /* Per-chapter play button inside the TOC list */
 .toc-tts-btn {
   position: relative;            /* anchor for spinner */
@@ -153,125 +130,6 @@ body {
 
 @keyframes tts-spin {
   to { transform: rotate(360deg); }
-}
-
-/* Settings (cog) button — slightly muted by default */
-.tts-settings-btn {
-  color: var(--muted);
-  font-size: 14px;
-}
-
-/* Settings modal */
-.tts-settings-modal {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-}
-
-.tts-settings-modal[hidden] { display: none; }
-
-.tts-settings-backdrop {
-  position: absolute;
-  inset: 0;
-  background: rgba(20, 14, 6, 0.55);
-  backdrop-filter: blur(2px);
-  -webkit-backdrop-filter: blur(2px);
-}
-
-.tts-settings-dialog {
-  position: relative;
-  background: var(--card-bg);
-  border-radius: 6px;
-  padding: 28px 26px 22px;
-  width: 100%;
-  max-width: 420px;
-  box-shadow: 0 16px 50px rgba(0,0,0,0.32);
-  z-index: 1;
-  max-height: 90vh;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-}
-
-.tts-settings-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text);
-  margin-bottom: 18px;
-  letter-spacing: 0.04em;
-}
-
-.tts-settings-row {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: 14px;
-}
-
-.tts-settings-row label {
-  font-size: 12px;
-  color: var(--muted);
-  letter-spacing: 0.04em;
-}
-
-.tts-settings-row select,
-.tts-settings-row input {
-  height: 38px;
-  padding: 0 12px;
-  font-size: 13px;
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text);
-  font-family: inherit;
-}
-
-.tts-settings-row select:focus,
-.tts-settings-row input:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-
-.tts-settings-note {
-  font-size: 11px;
-  color: var(--muted);
-  line-height: 1.6;
-  margin: 4px 0 18px;
-}
-
-.tts-settings-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.tts-settings-actions .btn {
-  height: 38px;
-  min-height: 38px;
-  padding: 0 16px;
-  border-radius: 4px;
-  font-size: 12px;
-  letter-spacing: 0.04em;
-}
-
-.tts-settings-save {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-}
-
-.tts-settings-save:hover,
-.tts-settings-save:active {
-  background: #543a1f;
-  border-color: #543a1f;
-}
-
-/* Hide ElevenLabs-only fields when "browser" provider is selected */
-.tts-settings-modal.is-browser .tts-elevenlabs-only {
-  display: none;
 }
 
 /* Hidden audio element should not affect layout */
@@ -648,13 +506,6 @@ body {
     min-width: 34px;
     min-height: 34px;
     font-size: 11px;
-  }
-
-  .tts-voice-select {
-    height: 34px;
-    max-width: 96px;
-    font-size: 10px;
-    padding: 0 22px 0 10px;
   }
 
   .toc-tts-btn {
