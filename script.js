@@ -524,8 +524,7 @@ let ttsLoadingSection = -1;        // section idx whose audio is being fetched
 
 // ── External-API engine settings (ElevenLabs) ─────────────────
 const TTS_API_DEFAULTS = {
-
-  voiceId: 'nPczCjzI2devNBz1zQrb',
+  voiceId: 'nPczCjzI2devNBz1zQrb',  // "Brian" — warm, deep narrator (male)
   modelId: 'eleven_multilingual_v2'
 };
 
