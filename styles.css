@@ -29,29 +29,40 @@ body {
   display: flex;
   flex-direction: column;
   gap: 20px;
-  position: relative;            /* anchor for floating .tts-controls */
 }
 
-/* ── TTS floating controls ── */
+/* ── TTS floating pill (fixed near the bottom of the viewport) ── */
 .tts-controls {
-  position: absolute;
-  top: 14px;
-  right: 14px;
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
-  gap: 6px;
-  z-index: 5;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;          /* full pill */
+  box-shadow:
+    0 1px 2px  rgba(0,0,0,0.06),
+    0 6px 18px rgba(0,0,0,0.14),
+    0 16px 40px rgba(0,0,0,0.06);
+  z-index: 50;
 }
 
 .tts-controls[hidden] { display: none; }
 
 .tts-btn {
-  width: 36px;
-  height: 36px;
-  min-width: 36px;
-  min-height: 36px;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
   padding: 0;
+  border: none;                  /* pill carries the visible border */
+  background: transparent;
   border-radius: 50%;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--accent);
   display: flex;
   align-items: center;
@@ -59,15 +70,9 @@ body {
 }
 
 .tts-btn:hover:not(:disabled),
-.tts-btn:active:not(:disabled) {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-
+.tts-btn:active:not(:disabled),
 .tts-btn.is-active {
   background: var(--accent);
-  border-color: var(--accent);
   color: #fff;
 }
 
@@ -493,19 +498,27 @@ body {
     overflow: hidden;
   }
 
-  /* ── TTS controls: smaller, tighter to the corner on mobile ── */
+  /* ── TTS pill on mobile: above the 60 px fixed page-nav, with
+        larger buttons that meet the iOS 44 × 44 tap-target guideline. */
   .tts-controls {
-    top: 8px;
-    right: 8px;
-    gap: 4px;
+    bottom: 76px;                /* 60 px page-nav + 16 px gap */
+    padding: 8px;
+    gap: 10px;
   }
 
   .tts-btn {
-    width: 34px;
-    height: 34px;
-    min-width: 34px;
-    min-height: 34px;
-    font-size: 11px;
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+    font-size: 14px;
+  }
+
+  /* Reserve room at the bottom of reading pages so the floating pill
+     never covers the last lines of text once the content scrolls. */
+  .book-card.chapter-first,
+  .book-card.chapter-cont {
+    padding-bottom: 80px;
   }
 
   .toc-tts-btn {
