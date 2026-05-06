@@ -489,10 +489,17 @@ window.addEventListener('resize', () => {
 });
 
 // ============================================================
-// TEXT-TO-SPEECH (Web Speech API, ko-KR)
-// Reads the full chapter that contains the current page.
-// Picks a Korean voice; prefers warm, female-sounding presets
-// when available. No specific person's voice is cloned.
+// TEXT-TO-SPEECH
+// Two engines, picked at runtime from settings:
+//   • "elevenlabs" — calls the ElevenLabs API for an AI-generated
+//     audiobook-style Korean narration (multilingual_v2 model). Audio
+//     is fetched as MP3, played via a single hidden <audio> element,
+//     and cached per-chapter as a blob URL so repeat plays are free.
+//   • "browser"    — falls back to the Web Speech API (speechSynthesis)
+//     with a preferred ko-KR female voice. No API key required.
+// The user picks the engine + provides their key in the settings dialog;
+// settings live in localStorage and never leave the device.
+// No specific real person's voice is cloned.
 // ============================================================
 
 const TTS_LANG = 'ko-KR';
@@ -510,8 +517,156 @@ const TTS_PREFERRED_VOICES = [
 let ttsVoice = null;
 let ttsState = 'idle';      // 'idle' | 'playing' | 'paused'
 let ttsSectionIdx = -1;     // section currently being spoken
-let ttsQueueLen = 0;        // remaining utterances in the current chapter
+let ttsQueueLen = 0;        // remaining utterances (browser engine)
 let ttsToastTimer = null;
+let ttsActiveEngine = 'browser';   // 'browser' | 'api' — engine handling current playback
+let ttsLoadingSection = -1;        // section idx whose audio is being fetched
+
+// ── External-API engine settings (ElevenLabs) ─────────────────
+const TTS_API_DEFAULTS = {
+  // ElevenLabs default voice — calm, soft female; multilingual_v2
+  // handles Korean naturally. Users can override in settings.
+  voiceId: 'EXAVITQu4vr4xnSDxMaL',  // "Bella"
+  modelId: 'eleven_multilingual_v2'
+};
+
+let ttsProvider     = 'browser';   // 'browser' | 'elevenlabs'
+let ttsApiKey       = '';
+let ttsApiVoiceId   = TTS_API_DEFAULTS.voiceId;
+
+// In-memory cache of generated chapter audio.  Map<sectionIdx, blobUrl>.
+// Survives the session; cleared on reload (audio is regenerated lazily
+// the first time a chapter is played again).
+const ttsAudioCache = new Map();
+let ttsAudioEl = null;
+
+function loadTtsSettings() {
+  try {
+    ttsProvider   = localStorage.getItem('ebook_tts_provider')          || 'browser';
+    ttsApiKey     = localStorage.getItem('ebook_tts_elevenlabs_key')    || '';
+    ttsApiVoiceId = localStorage.getItem('ebook_tts_elevenlabs_voice')  || TTS_API_DEFAULTS.voiceId;
+  } catch (_) { /* private mode etc. */ }
+  if (ttsProvider !== 'elevenlabs') ttsProvider = 'browser';
+}
+
+function saveTtsSettings(provider, apiKey, voiceId) {
+  ttsProvider   = provider === 'elevenlabs' ? 'elevenlabs' : 'browser';
+  ttsApiKey     = apiKey || '';
+  ttsApiVoiceId = (voiceId || '').trim() || TTS_API_DEFAULTS.voiceId;
+  try {
+    localStorage.setItem('ebook_tts_provider',         ttsProvider);
+    localStorage.setItem('ebook_tts_elevenlabs_key',   ttsApiKey);
+    localStorage.setItem('ebook_tts_elevenlabs_voice', ttsApiVoiceId);
+  } catch (_) {}
+}
+
+// True when the user has opted into the AI engine *and* supplied the
+// minimum required credentials. Anything else falls back to the browser.
+function isApiEngineActive() {
+  return ttsProvider === 'elevenlabs' && !!ttsApiKey && !!ttsApiVoiceId;
+}
+
+function ensureAudioEl() {
+  if (ttsAudioEl) return ttsAudioEl;
+  ttsAudioEl = document.getElementById('ttsAudio');
+  if (!ttsAudioEl) {
+    ttsAudioEl = document.createElement('audio');
+    ttsAudioEl.id = 'ttsAudio';
+    ttsAudioEl.preload = 'auto';
+    document.body.appendChild(ttsAudioEl);
+  }
+  ttsAudioEl.addEventListener('ended', () => {
+    if (ttsActiveEngine !== 'api') return;
+    ttsState = 'idle';
+    ttsSectionIdx = -1;
+    updateTtsForPage();
+  });
+  ttsAudioEl.addEventListener('error', () => {
+    if (ttsActiveEngine !== 'api') return;
+    ttsState = 'idle';
+    ttsSectionIdx = -1;
+    showTtsToast('오디오 재생 중 오류가 발생했습니다.');
+    updateTtsForPage();
+  });
+  return ttsAudioEl;
+}
+
+function chapterPlainText(sIdx) {
+  const section = sections[sIdx];
+  if (!section) return '';
+  return section.content.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+// POST to ElevenLabs and return an audio Blob.  Throws on any non-2xx.
+async function fetchElevenLabsAudio(text) {
+  if (!ttsApiKey)     throw new Error('API 키가 설정되어 있지 않습니다.');
+  if (!ttsApiVoiceId) throw new Error('Voice ID가 비어 있습니다.');
+
+  const endpoint = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(ttsApiVoiceId)}`;
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'xi-api-key':   ttsApiKey,
+      'Content-Type': 'application/json',
+      'Accept':       'audio/mpeg'
+    },
+    body: JSON.stringify({
+      text,
+      model_id: TTS_API_DEFAULTS.modelId,
+      voice_settings: {
+        stability:        0.55,   // a touch of expressiveness
+        similarity_boost: 0.78,
+        style:            0.18,   // gentle warmth without theatrics
+        use_speaker_boost: true
+      }
+    })
+  });
+
+  if (!res.ok) {
+    let msg = `API 오류 (${res.status})`;
+    try {
+      const data   = await res.json();
+      const detail = data && (data.detail && (data.detail.message || data.detail) || data.message);
+      if (detail) msg = typeof detail === 'string' ? detail : JSON.stringify(detail);
+    } catch (_) {}
+    throw new Error(msg);
+  }
+  return res.blob();
+}
+
+// Returns a playable blob: URL for the chapter, generating + caching it
+// on first request. Subsequent calls for the same chapter are instant.
+async function ensureSectionAudioUrl(sIdx) {
+  if (ttsAudioCache.has(sIdx)) return ttsAudioCache.get(sIdx);
+
+  const text = chapterPlainText(sIdx);
+  if (!text) throw new Error('읽을 본문이 없습니다.');
+  // ElevenLabs caps a single request at ~5,000 characters. Refuse over
+  // that rather than silently truncating.
+  if (text.length > 4500) {
+    throw new Error('이 장은 너무 길어 한 번에 생성할 수 없습니다 (최대 4,500자).');
+  }
+
+  const blob = await fetchElevenLabsAudio(text);
+  const url  = URL.createObjectURL(blob);
+  ttsAudioCache.set(sIdx, url);
+  return url;
+}
+
+// Hard-stops both engines so we can switch cleanly between them.
+function ttsCancelAll() {
+  if (ttsAudioEl) {
+    try {
+      ttsAudioEl.pause();
+      ttsAudioEl.removeAttribute('src');
+      ttsAudioEl.load();
+    } catch (_) {}
+  }
+  if (ttsSupported()) {
+    try { window.speechSynthesis.cancel(); } catch (_) {}
+  }
+  ttsQueueLen = 0;
+}
 
 function ttsSupported() {
   return typeof window !== 'undefined' && 'speechSynthesis' in window;
@@ -531,27 +686,36 @@ function pickKoreanVoice() {
 }
 
 function initTts() {
-  if (!ttsSupported()) {
-    const ctrl = document.getElementById('ttsControls');
-    if (ctrl) ctrl.style.display = 'none';
-    return;
-  }
-  ttsVoice = pickKoreanVoice();
-  applySavedVoicePreference();
-  populateVoiceSelect();
+  loadTtsSettings();
+  ensureAudioEl();
 
-  // On Chrome/Edge the voice list loads asynchronously
-  window.speechSynthesis.addEventListener('voiceschanged', () => {
+  // The floating bar is useful even when the browser engine is missing,
+  // because the user might still configure ElevenLabs from settings.
+  // We only fully hide it when *neither* engine could ever work.
+  const browserAvailable = ttsSupported();
+  const ctrl = document.getElementById('ttsControls');
+  if (!browserAvailable && !isApiEngineActive() && ctrl) {
+    // Keep the settings button reachable so the user can flip on the API.
+    // The play / stop / voice picker will just stay disabled / hidden.
+  }
+
+  // Browser-engine voices (used when provider === 'browser')
+  if (browserAvailable) {
     ttsVoice = pickKoreanVoice();
     applySavedVoicePreference();
     populateVoiceSelect();
-  });
+    window.speechSynthesis.addEventListener('voiceschanged', () => {
+      ttsVoice = pickKoreanVoice();
+      applySavedVoicePreference();
+      populateVoiceSelect();
+    });
+  }
 
   document.getElementById('ttsPlayBtn').addEventListener('click', ttsTogglePlay);
   document.getElementById('ttsStopBtn').addEventListener('click', ttsStop);
 
   const voiceSel = document.getElementById('ttsVoiceSelect');
-  if (voiceSel) {
+  if (voiceSel && browserAvailable) {
     voiceSel.addEventListener('change', (e) => {
       const voices = window.speechSynthesis.getVoices() || [];
       const chosen = voices.find(v => v.name === e.target.value);
@@ -562,10 +726,73 @@ function initTts() {
     });
   }
 
-  // Cancel any in-flight speech if the page is unloaded
+  initTtsSettingsDialog();
+
+  // Cancel any in-flight speech / audio if the page is unloaded
   window.addEventListener('beforeunload', () => {
-    try { window.speechSynthesis.cancel(); } catch (_) {}
+    ttsCancelAll();
   });
+}
+
+// ── Settings dialog ───────────────────────────────────────────
+function initTtsSettingsDialog() {
+  const openBtn   = document.getElementById('ttsSettingsBtn');
+  const modal     = document.getElementById('ttsSettingsModal');
+  const backdrop  = document.getElementById('ttsSettingsBackdrop');
+  const cancelBtn = document.getElementById('ttsSettingsCancel');
+  const saveBtn   = document.getElementById('ttsSettingsSave');
+  const provSel   = document.getElementById('ttsProviderSelect');
+  const keyInput  = document.getElementById('ttsApiKeyInput');
+  const voiceInput= document.getElementById('ttsVoiceIdInput');
+  if (!openBtn || !modal || !provSel) return;
+
+  function reflectProvider() {
+    modal.classList.toggle('is-browser', provSel.value !== 'elevenlabs');
+  }
+
+  function openModal() {
+    provSel.value   = ttsProvider;
+    keyInput.value  = ttsApiKey;
+    voiceInput.value = ttsApiVoiceId === TTS_API_DEFAULTS.voiceId ? '' : ttsApiVoiceId;
+    voiceInput.placeholder = TTS_API_DEFAULTS.voiceId;
+    reflectProvider();
+    modal.hidden = false;
+    setTimeout(() => keyInput.focus(), 50);
+  }
+  function closeModal() { modal.hidden = true; }
+
+  openBtn.addEventListener('click', openModal);
+  cancelBtn.addEventListener('click', closeModal);
+  backdrop.addEventListener('click', closeModal);
+  provSel.addEventListener('change', reflectProvider);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !modal.hidden) closeModal();
+  });
+
+  saveBtn.addEventListener('click', () => {
+    const newProvider = provSel.value;
+    const newKey      = keyInput.value.trim();
+    const newVoice    = voiceInput.value.trim();
+    // Cancel any in-flight playback so the new engine starts clean
+    ttsStop();
+    saveTtsSettings(newProvider, newKey, newVoice);
+    // Engine change invalidates already-cached audio (different voice)
+    ttsClearAudioCache();
+    closeModal();
+    updateTtsForPage();
+    if (newProvider === 'elevenlabs' && !newKey) {
+      showTtsToast('ElevenLabs API 키를 입력해 주세요.');
+    } else if (newProvider === 'elevenlabs') {
+      showTtsToast('AI 음성으로 전환되었습니다.');
+    } else {
+      showTtsToast('브라우저 음성으로 전환되었습니다.');
+    }
+  });
+}
+
+function ttsClearAudioCache() {
+  ttsAudioCache.forEach((url) => { try { URL.revokeObjectURL(url); } catch (_) {} });
+  ttsAudioCache.clear();
 }
 
 function applySavedVoicePreference() {
@@ -654,19 +881,45 @@ function speakSection(idx) {
   });
 }
 
-// Start, pause or resume playback for a specific section index. Used by
-// the per-chapter play buttons in the TOC. Does NOT navigate the page —
-// the user can keep browsing the TOC while a chapter plays.
+// ── Playback router ──────────────────────────────────────────
+// Public entry. Picks the right engine and starts / toggles playback for
+// the given section. Used by per-chapter buttons + ttsTogglePlay.
 function ttsPlaySection(sIdx) {
+  const section = sections[sIdx];
+  if (!section || (section.type !== 'chapter' && section.type !== 'front')) return;
+
+  if (isApiEngineActive()) {
+    ttsApiPlay(sIdx);
+  } else {
+    ttsBrowserPlay(sIdx);
+  }
+}
+
+function ttsTogglePlay() {
+  const here = getCurrentChapterSection();
+  if (!here) return;
+  ttsPlaySection(here.idx);
+}
+
+// Cancels both engines so we can switch cleanly (e.g. provider change,
+// or the user hits Stop).
+function ttsStop() {
+  ttsCancelAll();
+  ttsState = 'idle';
+  ttsSectionIdx = -1;
+  ttsLoadingSection = -1;
+  updateTtsForPage();
+}
+
+// ── Browser engine (Web Speech API) ──────────────────────────
+function ttsBrowserPlay(sIdx) {
   if (!ttsSupported()) {
     showTtsToast('이 브라우저는 음성 합성을 지원하지 않습니다.');
     return;
   }
-  const section = sections[sIdx];
-  if (!section || (section.type !== 'chapter' && section.type !== 'front')) return;
 
-  // Same chapter → toggle pause/resume
-  if (ttsSectionIdx === sIdx) {
+  // Same section → toggle pause / resume
+  if (ttsSectionIdx === sIdx && ttsActiveEngine === 'browser' && ttsState !== 'idle') {
     if (ttsState === 'playing') {
       window.speechSynthesis.pause();
       ttsState = 'paused';
@@ -681,88 +934,90 @@ function ttsPlaySection(sIdx) {
     }
   }
 
-  // Different chapter (or idle) → start fresh
+  // Fresh start (or switching chapter / engine)
   if (!ttsVoice) ttsVoice = pickKoreanVoice();
   if (!ttsVoice) {
     showTtsToast('현재 브라우저에 한국어 음성이 설치되어 있지 않습니다.');
     return;
   }
-  try { window.speechSynthesis.cancel(); } catch (_) {}
+  ttsCancelAll();
+  ttsActiveEngine = 'browser';
   ttsSectionIdx = sIdx;
   ttsState = 'playing';
+  ttsLoadingSection = -1;
   speakSection(sIdx);
   updateTtsForPage();
 }
 
-function ttsTogglePlay() {
-  if (!ttsSupported()) {
-    showTtsToast('이 브라우저는 음성 합성을 지원하지 않습니다.');
-    return;
-  }
+// ── ElevenLabs engine (HTTP + <audio>) ───────────────────────
+async function ttsApiPlay(sIdx) {
+  const audio = ensureAudioEl();
 
-  const here = getCurrentChapterSection();
-  if (!here) return;   // not a chapter / front-matter page
-
-  // Already playing or paused
-  if (ttsState !== 'idle') {
-    // If user clicked play on a different chapter, switch to it
-    if (ttsSectionIdx !== here.idx) {
-      ttsStop();
-      // fall through to start fresh on the new chapter
-    } else if (ttsState === 'playing') {
-      window.speechSynthesis.pause();
+  // Same section currently active under the API engine → toggle pause
+  if (ttsSectionIdx === sIdx && ttsActiveEngine === 'api' && ttsState !== 'idle') {
+    if (ttsState === 'playing') {
+      audio.pause();
       ttsState = 'paused';
       updateTtsForPage();
       return;
-    } else if (ttsState === 'paused') {
-      window.speechSynthesis.resume();
-      ttsState = 'playing';
+    }
+    if (ttsState === 'paused') {
+      try {
+        await audio.play();
+        ttsState = 'playing';
+      } catch (e) {
+        showTtsToast('재생을 시작할 수 없습니다.');
+        ttsState = 'idle';
+      }
       updateTtsForPage();
       return;
     }
   }
 
-  // Start fresh
-  if (!ttsVoice) ttsVoice = pickKoreanVoice();
-  if (!ttsVoice) {
-    showTtsToast('현재 브라우저에 한국어 음성이 설치되어 있지 않습니다.');
-    return;
+  // Switching chapter / engine — cancel anything in flight
+  ttsCancelAll();
+  ttsActiveEngine   = 'api';
+  ttsSectionIdx     = sIdx;
+  ttsLoadingSection = sIdx;
+  ttsState          = 'idle';   // not "playing" yet — we're loading
+  updateTtsForPage();           // shows the spinner
+
+  try {
+    const url = await ensureSectionAudioUrl(sIdx);
+
+    // The user may have moved on while we were fetching
+    if (ttsLoadingSection !== sIdx) return;
+
+    audio.src = url;
+    await audio.play();
+
+    ttsState          = 'playing';
+    ttsLoadingSection = -1;
+    updateTtsForPage();
+  } catch (err) {
+    ttsLoadingSection = -1;
+    ttsSectionIdx     = -1;
+    ttsState          = 'idle';
+    showTtsToast(err && err.message ? err.message : '음성 생성에 실패했습니다.');
+    updateTtsForPage();
   }
-
-  try { window.speechSynthesis.cancel(); } catch (_) {}
-  ttsSectionIdx = here.idx;
-  ttsState = 'playing';
-  speakSection(here.idx);
-  updateTtsForPage();
 }
 
-function ttsStop() {
-  if (!ttsSupported()) return;
-  try { window.speechSynthesis.cancel(); } catch (_) {}
-  ttsState = 'idle';
-  ttsSectionIdx = -1;
-  ttsQueueLen = 0;
-  updateTtsForPage();
-}
-
-// Refreshes button visibility, button icons, and the "speaking" indicator
-// on the chapter title / TOC entry. Called after each renderPage() and
-// after every TTS state change.
+// Refreshes button visibility, button icons, loading state, and the
+// "speaking" indicator on the chapter title / TOC entry. Called after
+// each renderPage() and after every TTS state change.
 function updateTtsForPage() {
-  const ctrl    = document.getElementById('ttsControls');
-  const playBtn = document.getElementById('ttsPlayBtn');
-  const stopBtn = document.getElementById('ttsStopBtn');
+  const ctrl     = document.getElementById('ttsControls');
+  const playBtn  = document.getElementById('ttsPlayBtn');
+  const stopBtn  = document.getElementById('ttsStopBtn');
+  const voiceSel = document.getElementById('ttsVoiceSelect');
   if (!ctrl || !playBtn || !stopBtn) return;
-
-  if (!ttsSupported()) {
-    ctrl.hidden = true;
-    return;
-  }
 
   const page = allPages[currentPage] || {};
   const isReadingPage = page.sectionType === 'chapter' || page.sectionType === 'front';
   const isTocVisible  = !!page.isToc;
   const isSpeaking    = ttsState !== 'idle';
+  const isLoading     = ttsLoadingSection !== -1;
 
   // Show the floating bar on chapter / front-matter pages always; on the
   // TOC page show it too (for the voice picker + global stop while playing).
@@ -772,8 +1027,24 @@ function updateTtsForPage() {
   // on the TOC, per-chapter play buttons handle starting playback.
   playBtn.style.display = isTocVisible ? 'none' : '';
 
+  // Hide the browser-voice picker when the API engine is in charge —
+  // it has no effect on AI playback. populateVoiceSelect() controls
+  // visibility otherwise (only shows when ≥2 ko voices are installed).
+  if (voiceSel && isApiEngineActive()) voiceSel.hidden = true;
+
+  // Loading spinner on the global button when fetching audio for the
+  // chapter that's actually visible. (For other chapters we surface the
+  // spinner on the TOC button instead.)
+  const loadingHere = isLoading && page.sectionIdx === ttsLoadingSection;
+  playBtn.classList.toggle('is-loading', !!loadingHere);
+
   // Global play/pause button state
-  if (ttsState === 'playing') {
+  if (loadingHere) {
+    playBtn.innerHTML = '';                    // spinner via ::after
+    playBtn.classList.add('is-active');
+    playBtn.setAttribute('aria-label', '음성 준비 중');
+    stopBtn.disabled = false;                  // user can cancel a load
+  } else if (ttsState === 'playing') {
     playBtn.innerHTML = '&#10074;&#10074;';   // ❚❚ pause
     playBtn.classList.add('is-active');
     playBtn.setAttribute('aria-label', '일시정지');
@@ -787,7 +1058,7 @@ function updateTtsForPage() {
     playBtn.innerHTML = '&#9654;';             // ▶ play
     playBtn.classList.remove('is-active');
     playBtn.setAttribute('aria-label', '음성으로 듣기');
-    stopBtn.disabled = !isSpeaking;            // disabled when nothing's playing
+    stopBtn.disabled = !isSpeaking && !isLoading;
   }
 
   // Speaking indicator on the visible chapter title
@@ -806,10 +1077,18 @@ function updateTtsForPage() {
 
   // Per-chapter play buttons inside the TOC list
   document.querySelectorAll('.toc-tts-btn').forEach(btn => {
-    const sIdx = parseInt(btn.dataset.section, 10);
-    const isThis = Number.isFinite(sIdx) && sIdx === ttsSectionIdx && isSpeaking;
-    if (isThis && ttsState === 'playing') {
-      btn.innerHTML = '&#10074;&#10074;';     // ❚❚
+    const sIdx     = parseInt(btn.dataset.section, 10);
+    const isThis   = Number.isFinite(sIdx) && sIdx === ttsSectionIdx && isSpeaking;
+    const isLoadingThis = Number.isFinite(sIdx) && sIdx === ttsLoadingSection;
+
+    btn.classList.toggle('is-loading', !!isLoadingThis);
+
+    if (isLoadingThis) {
+      btn.innerHTML = '';                                 // spinner via ::after
+      btn.classList.add('is-active');
+      btn.setAttribute('aria-label', '음성 준비 중');
+    } else if (isThis && ttsState === 'playing') {
+      btn.innerHTML = '&#10074;&#10074;';                 // ❚❚
       btn.classList.add('is-active');
       btn.setAttribute('aria-label', '일시정지');
     } else if (isThis && ttsState === 'paused') {
