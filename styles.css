@@ -321,27 +321,28 @@ body {
     gap: 0;
   }
 
-  /* ── Book card: fills remaining height, no scroll (reading pages) ── */
+  /* ── Book card: fills remaining height, scrolls internally when text overflows ── */
   .book-card {
     flex: 1;
-    min-height: 0;        /* allow flex to constrain height */
+    min-height: 0;                       /* allow flex to constrain height */
     border-radius: 0;
     box-shadow: none;
     padding: 32px 22px 20px;
-    overflow: hidden;     /* reading pages never scroll */
+    overflow-y: auto;                    /* enlarged text stays reachable */
+    -webkit-overflow-scrolling: touch;   /* smooth momentum scroll on iOS */
+    overscroll-behavior: contain;        /* don't chain scroll to body */
   }
 
-  /* ── TOC exception: allow internal scroll ── */
+  /* ── TOC: same scroll behavior, slightly more bottom padding ── */
   .book-card.toc {
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
     padding-bottom: 8px;
   }
 
-  /* ── Cover ── */
+  /* ── Cover: keep centered, no scroll needed ── */
   .book-card.cover {
     padding: 40px 24px;
     justify-content: center;
+    overflow: hidden;
   }
 
   .cover-genre {
