@@ -534,11 +534,44 @@ let ttsProvider     = 'browser';   // 'browser' | 'elevenlabs'
 let ttsApiKey       = '';
 let ttsApiVoiceId   = TTS_API_DEFAULTS.voiceId;
 
-// In-memory cache of generated chapter audio.  Map<sectionIdx, blobUrl>.
-// Survives the session; cleared on reload (audio is regenerated lazily
-// the first time a chapter is played again).
+// In-memory cache of chapter audio URLs. Map<sectionIdx, url>.
+// The URL may be a static path (e.g. "audio/3.mp3") or a blob: URL
+// returned by URL.createObjectURL(). Survives the session.
 const ttsAudioCache = new Map();
+
+// Result of the existence probe for each pre-generated static file.
+// Map<sectionIdx, 'present' | 'absent'>. We probe lazily and remember
+// the answer for the rest of the session, so each chapter costs at
+// most one HEAD request.
+const ttsStaticProbe = new Map();
+
 let ttsAudioEl = null;
+
+// Path to the optional pre-generated audio for a section. Relative so
+// the same code works at the domain root or under a sub-path (GitHub
+// Pages project sites, custom subdirectories, etc.).
+function staticAudioPath(sIdx) {
+  return `audio/${sIdx}.mp3`;
+}
+
+// Returns the static URL when the file exists, otherwise null. The
+// HEAD request is fast and runs at most once per chapter per session.
+async function getStaticAudioUrl(sIdx) {
+  const cached = ttsStaticProbe.get(sIdx);
+  if (cached === 'absent')  return null;
+  if (cached === 'present') return staticAudioPath(sIdx);
+
+  const url = staticAudioPath(sIdx);
+  try {
+    const res = await fetch(url, { method: 'HEAD' });
+    if (res.ok) {
+      ttsStaticProbe.set(sIdx, 'present');
+      return url;
+    }
+  } catch (_) { /* network / CORS / file:// — treat as absent */ }
+  ttsStaticProbe.set(sIdx, 'absent');
+  return null;
+}
 
 function loadTtsSettings() {
   try {
@@ -634,10 +667,30 @@ async function fetchElevenLabsAudio(text) {
   return res.blob();
 }
 
-// Returns a playable blob: URL for the chapter, generating + caching it
-// on first request. Subsequent calls for the same chapter are instant.
+// Returns a playable URL for the chapter, generating + caching it on
+// first request. Source preference, in order:
+//   1. ttsAudioCache (already resolved this session)
+//   2. /audio/{sIdx}.mp3 — pre-generated static file (no API call)
+//   3. ElevenLabs API   — only when the user has configured a key
+// Subsequent calls for the same chapter are instant. Throws Error with
+// `kind: 'no-source'` when neither static nor API can serve, so the
+// caller can transparently fall back to the browser engine.
 async function ensureSectionAudioUrl(sIdx) {
   if (ttsAudioCache.has(sIdx)) return ttsAudioCache.get(sIdx);
+
+  // 1. Pre-generated static file (free, fast, and shared by all users)
+  const staticUrl = await getStaticAudioUrl(sIdx);
+  if (staticUrl) {
+    ttsAudioCache.set(sIdx, staticUrl);
+    return staticUrl;
+  }
+
+  // 2. Fall back to the ElevenLabs API — but only if it's configured.
+  if (!isApiEngineActive()) {
+    const e = new Error('재생할 음성을 찾을 수 없습니다.');
+    e.kind = 'no-source';
+    throw e;
+  }
 
   const text = chapterPlainText(sIdx);
   if (!text) throw new Error('읽을 본문이 없습니다.');
@@ -884,15 +937,33 @@ function speakSection(idx) {
 // ── Playback router ──────────────────────────────────────────
 // Public entry. Picks the right engine and starts / toggles playback for
 // the given section. Used by per-chapter buttons + ttsTogglePlay.
+//
+// Routing strategy:
+//   • First attempt the audio-element engine. ensureSectionAudioUrl()
+//     will use a pre-generated file (audio/{sIdx}.mp3) if one exists,
+//     so any visitor — even with no API key — gets the AI voice for
+//     chapters that have been pre-generated.
+//   • If neither a static file nor a configured API key is available,
+//     ttsApiPlay() throws kind:'no-source' and we fall through to the
+//     browser TTS engine inside ttsApiPlay's catch block.
+//   • If the same chapter is already playing under the browser engine
+//     (common: a previous play fell through to it), we route the
+//     toggle directly to it so pause / resume keeps working.
 function ttsPlaySection(sIdx) {
   const section = sections[sIdx];
   if (!section || (section.type !== 'chapter' && section.type !== 'front')) return;
 
-  if (isApiEngineActive()) {
-    ttsApiPlay(sIdx);
-  } else {
+  // If this chapter is currently being read by the browser engine,
+  // keep it there for pause / resume. (The audio engine is preferred
+  // for fresh starts; once playback is committed to an engine, stay.)
+  if (ttsActiveEngine === 'browser' &&
+      ttsSectionIdx === sIdx &&
+      ttsState !== 'idle') {
     ttsBrowserPlay(sIdx);
+    return;
   }
+
+  ttsApiPlay(sIdx);
 }
 
 function ttsTogglePlay() {
@@ -949,11 +1020,14 @@ function ttsBrowserPlay(sIdx) {
   updateTtsForPage();
 }
 
-// ── ElevenLabs engine (HTTP + <audio>) ───────────────────────
+// ── Audio-element engine (pre-generated static file OR ElevenLabs) ──
+// Despite the historical name, this engine handles every <audio>-based
+// playback, regardless of whether the URL came from /audio/{sIdx}.mp3
+// or from the ElevenLabs API. ensureSectionAudioUrl() picks the source.
 async function ttsApiPlay(sIdx) {
   const audio = ensureAudioEl();
 
-  // Same section currently active under the API engine → toggle pause
+  // Same section currently active under this engine → toggle pause
   if (ttsSectionIdx === sIdx && ttsActiveEngine === 'api' && ttsState !== 'idle') {
     if (ttsState === 'playing') {
       audio.pause();
@@ -996,8 +1070,19 @@ async function ttsApiPlay(sIdx) {
     updateTtsForPage();
   } catch (err) {
     ttsLoadingSection = -1;
-    ttsSectionIdx     = -1;
-    ttsState          = 'idle';
+
+    // Nothing pre-generated AND no API key configured. Quietly fall
+    // back to the browser TTS engine so the reader still gets audio.
+    if (err && err.kind === 'no-source') {
+      ttsActiveEngine = 'browser';
+      ttsSectionIdx   = -1;
+      ttsState        = 'idle';
+      ttsBrowserPlay(sIdx);
+      return;
+    }
+
+    ttsSectionIdx = -1;
+    ttsState      = 'idle';
     showTtsToast(err && err.message ? err.message : '음성 생성에 실패했습니다.');
     updateTtsForPage();
   }
