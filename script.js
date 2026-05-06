@@ -354,6 +354,7 @@ function renderToc(card, page) {
     <div class="toc-entry" data-page="${e.pageIdx}" data-section="${e.sectionIdx}">
       <span class="toc-ch"></span>
       <span class="toc-entry-title is-front">${e.sectionTitle}</span>
+      <button class="toc-tts-btn" data-section="${e.sectionIdx}" aria-label="이 장 듣기" title="이 장 듣기">&#9654;</button>
       <span class="toc-page-num">${e.pageIdx + 1}</span>
     </div>
   `).join('');
@@ -362,6 +363,7 @@ function renderToc(card, page) {
     <div class="toc-entry" data-page="${e.pageIdx}" data-section="${e.sectionIdx}">
       <span class="toc-ch">Ch.${e.chapterNum}</span>
       <span class="toc-entry-title">${e.sectionTitle}</span>
+      <button class="toc-tts-btn" data-section="${e.sectionIdx}" aria-label="이 장 듣기" title="이 장 듣기">&#9654;</button>
       <span class="toc-page-num">${e.pageIdx + 1}</span>
     </div>
   `).join('');
@@ -381,6 +383,15 @@ function renderToc(card, page) {
 
   card.querySelectorAll('.toc-entry').forEach(el => {
     el.addEventListener('click', () => goTo(parseInt(el.dataset.page)));
+  });
+
+  // Per-chapter play button — triggers TTS for that chapter without navigating
+  card.querySelectorAll('.toc-tts-btn').forEach(btn => {
+    btn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const sIdx = parseInt(btn.dataset.section, 10);
+      if (Number.isFinite(sIdx)) ttsPlaySection(sIdx);
+    });
   });
 }
 
@@ -526,18 +537,67 @@ function initTts() {
     return;
   }
   ttsVoice = pickKoreanVoice();
+  applySavedVoicePreference();
+  populateVoiceSelect();
+
   // On Chrome/Edge the voice list loads asynchronously
   window.speechSynthesis.addEventListener('voiceschanged', () => {
     ttsVoice = pickKoreanVoice();
+    applySavedVoicePreference();
+    populateVoiceSelect();
   });
 
   document.getElementById('ttsPlayBtn').addEventListener('click', ttsTogglePlay);
   document.getElementById('ttsStopBtn').addEventListener('click', ttsStop);
 
+  const voiceSel = document.getElementById('ttsVoiceSelect');
+  if (voiceSel) {
+    voiceSel.addEventListener('change', (e) => {
+      const voices = window.speechSynthesis.getVoices() || [];
+      const chosen = voices.find(v => v.name === e.target.value);
+      if (chosen) {
+        ttsVoice = chosen;
+        try { localStorage.setItem('ebook_tts_voice', chosen.name); } catch (_) {}
+      }
+    });
+  }
+
   // Cancel any in-flight speech if the page is unloaded
   window.addEventListener('beforeunload', () => {
     try { window.speechSynthesis.cancel(); } catch (_) {}
   });
+}
+
+function applySavedVoicePreference() {
+  let savedName = null;
+  try { savedName = localStorage.getItem('ebook_tts_voice'); } catch (_) {}
+  if (!savedName || !ttsSupported()) return;
+  const voices = window.speechSynthesis.getVoices() || [];
+  const match = voices.find(v => v.name === savedName);
+  if (match) ttsVoice = match;
+}
+
+function populateVoiceSelect() {
+  const sel = document.getElementById('ttsVoiceSelect');
+  if (!sel || !ttsSupported()) return;
+  const voices = window.speechSynthesis.getVoices() || [];
+  const koVoices = voices.filter(v => v.lang && v.lang.toLowerCase().startsWith('ko'));
+
+  // Only show the picker when there's an actual choice to make
+  if (koVoices.length < 2) {
+    sel.hidden = true;
+    sel.innerHTML = '';
+    return;
+  }
+
+  const currentName = ttsVoice && ttsVoice.name;
+  sel.innerHTML = koVoices.map(v => {
+    const isSel = v.name === currentName ? ' selected' : '';
+    // Strip noisy suffixes like "(Natural)" / "Online (Natural)" for compactness
+    const label = v.name.replace(/Microsoft\s+/, '').replace(/\s+Online.*$/, '');
+    return `<option value="${v.name}"${isSel}>${label}</option>`;
+  }).join('');
+  sel.hidden = false;
 }
 
 // Split chapter text into sentence-sized chunks. Speaking many short
@@ -594,6 +654,46 @@ function speakSection(idx) {
   });
 }
 
+// Start, pause or resume playback for a specific section index. Used by
+// the per-chapter play buttons in the TOC. Does NOT navigate the page —
+// the user can keep browsing the TOC while a chapter plays.
+function ttsPlaySection(sIdx) {
+  if (!ttsSupported()) {
+    showTtsToast('이 브라우저는 음성 합성을 지원하지 않습니다.');
+    return;
+  }
+  const section = sections[sIdx];
+  if (!section || (section.type !== 'chapter' && section.type !== 'front')) return;
+
+  // Same chapter → toggle pause/resume
+  if (ttsSectionIdx === sIdx) {
+    if (ttsState === 'playing') {
+      window.speechSynthesis.pause();
+      ttsState = 'paused';
+      updateTtsForPage();
+      return;
+    }
+    if (ttsState === 'paused') {
+      window.speechSynthesis.resume();
+      ttsState = 'playing';
+      updateTtsForPage();
+      return;
+    }
+  }
+
+  // Different chapter (or idle) → start fresh
+  if (!ttsVoice) ttsVoice = pickKoreanVoice();
+  if (!ttsVoice) {
+    showTtsToast('현재 브라우저에 한국어 음성이 설치되어 있지 않습니다.');
+    return;
+  }
+  try { window.speechSynthesis.cancel(); } catch (_) {}
+  ttsSectionIdx = sIdx;
+  ttsState = 'playing';
+  speakSection(sIdx);
+  updateTtsForPage();
+}
+
 function ttsTogglePlay() {
   if (!ttsSupported()) {
     showTtsToast('이 브라우저는 음성 합성을 지원하지 않습니다.');
@@ -646,19 +746,33 @@ function ttsStop() {
 }
 
 // Refreshes button visibility, button icons, and the "speaking" indicator
-// on the chapter title / TOC entry. Called after each renderPage().
+// on the chapter title / TOC entry. Called after each renderPage() and
+// after every TTS state change.
 function updateTtsForPage() {
   const ctrl    = document.getElementById('ttsControls');
   const playBtn = document.getElementById('ttsPlayBtn');
   const stopBtn = document.getElementById('ttsStopBtn');
   if (!ctrl || !playBtn || !stopBtn) return;
 
-  const page = allPages[currentPage];
-  const showFor = ttsSupported() && page &&
-                  (page.sectionType === 'chapter' || page.sectionType === 'front');
-  ctrl.hidden = !showFor;
+  if (!ttsSupported()) {
+    ctrl.hidden = true;
+    return;
+  }
 
-  // Button icons + states
+  const page = allPages[currentPage] || {};
+  const isReadingPage = page.sectionType === 'chapter' || page.sectionType === 'front';
+  const isTocVisible  = !!page.isToc;
+  const isSpeaking    = ttsState !== 'idle';
+
+  // Show the floating bar on chapter / front-matter pages always; on the
+  // TOC page show it too (for the voice picker + global stop while playing).
+  ctrl.hidden = !(isReadingPage || isTocVisible);
+
+  // The global play/pause button is only useful on a reading page —
+  // on the TOC, per-chapter play buttons handle starting playback.
+  playBtn.style.display = isTocVisible ? 'none' : '';
+
+  // Global play/pause button state
   if (ttsState === 'playing') {
     playBtn.innerHTML = '&#10074;&#10074;';   // ❚❚ pause
     playBtn.classList.add('is-active');
@@ -673,21 +787,40 @@ function updateTtsForPage() {
     playBtn.innerHTML = '&#9654;';             // ▶ play
     playBtn.classList.remove('is-active');
     playBtn.setAttribute('aria-label', '음성으로 듣기');
-    stopBtn.disabled = true;
+    stopBtn.disabled = !isSpeaking;            // disabled when nothing's playing
   }
 
   // Speaking indicator on the visible chapter title
   const titleEl = document.querySelector('.book-card .chapter-title');
   if (titleEl) {
-    const isCurrent = page && page.sectionIdx === ttsSectionIdx && ttsState !== 'idle';
+    const isCurrent = page.sectionIdx === ttsSectionIdx && isSpeaking;
     titleEl.classList.toggle('is-speaking', !!isCurrent);
   }
 
-  // Speaking indicator in the TOC list (when visible)
+  // Speaking indicator on TOC entries
   document.querySelectorAll('.toc-entry').forEach(el => {
     const sIdx = parseInt(el.dataset.section, 10);
     el.classList.toggle('is-speaking',
-      Number.isFinite(sIdx) && sIdx === ttsSectionIdx && ttsState !== 'idle');
+      Number.isFinite(sIdx) && sIdx === ttsSectionIdx && isSpeaking);
+  });
+
+  // Per-chapter play buttons inside the TOC list
+  document.querySelectorAll('.toc-tts-btn').forEach(btn => {
+    const sIdx = parseInt(btn.dataset.section, 10);
+    const isThis = Number.isFinite(sIdx) && sIdx === ttsSectionIdx && isSpeaking;
+    if (isThis && ttsState === 'playing') {
+      btn.innerHTML = '&#10074;&#10074;';     // ❚❚
+      btn.classList.add('is-active');
+      btn.setAttribute('aria-label', '일시정지');
+    } else if (isThis && ttsState === 'paused') {
+      btn.innerHTML = '&#9654;';
+      btn.classList.add('is-active');
+      btn.setAttribute('aria-label', '이어서 재생');
+    } else {
+      btn.innerHTML = '&#9654;';
+      btn.classList.remove('is-active');
+      btn.setAttribute('aria-label', '이 장 듣기');
+    }
   });
 }
 

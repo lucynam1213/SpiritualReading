@@ -76,6 +76,55 @@ body {
   cursor: default;
 }
 
+/* Voice picker (native <select>, only shown when ≥2 ko voices exist) */
+.tts-voice-select {
+  height: 36px;
+  padding: 0 26px 0 12px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  max-width: 160px;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%239e8c70' d='M0 0l5 6 5-6z'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+
+.tts-voice-select:focus { outline: none; border-color: var(--accent); }
+.tts-voice-select[hidden] { display: none; }
+
+/* Per-chapter play button inside the TOC list */
+.toc-tts-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.toc-tts-btn:hover,
+.toc-tts-btn:active,
+.toc-tts-btn.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
 /* Pulsing dot next to the chapter title that's currently being read */
 .chapter-title.is-speaking::before {
   content: '◉';
@@ -89,12 +138,6 @@ body {
 .toc-entry.is-speaking .toc-entry-title {
   color: var(--accent);
   font-weight: 600;
-}
-
-.toc-entry.is-speaking .toc-page-num::before {
-  content: '◉ ';
-  color: var(--accent);
-  animation: tts-pulse 1.4s ease-in-out infinite;
 }
 
 @keyframes tts-pulse {
@@ -453,6 +496,18 @@ body {
     min-width: 34px;
     min-height: 34px;
     font-size: 11px;
+  }
+
+  .tts-voice-select {
+    height: 34px;
+    max-width: 96px;
+    font-size: 10px;
+    padding: 0 22px 0 10px;
+  }
+
+  .toc-tts-btn {
+    width: 30px;
+    height: 30px;
   }
 
   .cover-genre {
