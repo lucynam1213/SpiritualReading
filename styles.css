@@ -1,0 +1,441 @@
+:root {
+  --bg: #e8e3d8;
+  --card-bg: #f9f6ef;
+  --text: #2a1f10;
+  --muted: #9e8c70;
+  --accent: #6b4c2a;
+  --border: #d4c8ae;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg);
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  font-family: 'Noto Serif KR', 'Nanum Myeongjo', 'Batang', Georgia, serif;
+}
+
+.reader-wrapper {
+  width: 100%;
+  max-width: 660px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ── Book card ── */
+.book-card {
+  background: var(--card-bg);
+  border-radius: 3px;
+  box-shadow:
+    0 1px 3px rgba(0,0,0,0.06),
+    0 6px 20px rgba(0,0,0,0.09),
+    0 20px 60px rgba(0,0,0,0.05);
+  min-height: 540px;
+  padding: 52px 56px;
+  display: flex;
+  flex-direction: column;
+  transition: opacity 0.2s ease;
+}
+
+/* ── Cover page ── */
+.book-card.cover {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.cover-genre {
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin-bottom: 32px;
+}
+
+.cover-title {
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.5;
+  margin-bottom: 14px;
+}
+
+.cover-author {
+  font-size: 14px;
+  color: var(--muted);
+  margin-bottom: 44px;
+}
+
+.cover-divider {
+  width: 44px;
+  height: 1px;
+  background: var(--border);
+  margin: 0 auto 40px;
+}
+
+.cover-quote {
+  font-size: 16px;
+  line-height: 2;
+  color: var(--text);
+  max-width: 440px;
+  font-style: italic;
+}
+
+/* ── Table of Contents ── */
+.toc-header {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.1em;
+  text-align: center;
+  padding-bottom: 20px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.toc-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.toc-entry {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid transparent;
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.toc-entry:not(:last-child) {
+  border-bottom-color: var(--border);
+}
+
+.toc-entry:hover .toc-entry-title,
+.toc-entry:active .toc-entry-title {
+  color: var(--accent);
+}
+
+.toc-ch {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  width: 40px;
+  flex-shrink: 0;
+  text-align: right;
+}
+
+.toc-entry-title {
+  flex: 1;
+  font-size: 14px;
+  color: var(--text);
+  line-height: 1.45;
+  transition: color 0.12s;
+}
+
+.toc-entry-title.is-front {
+  font-style: italic;
+  color: var(--muted);
+}
+
+.toc-page-num {
+  font-size: 12px;
+  color: var(--muted);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.toc-separator {
+  height: 1px;
+  background: var(--border);
+  margin: 6px 0;
+}
+
+/* ── Chapter first page ── */
+.book-card.chapter-first .chapter-header {
+  text-align: center;
+  padding-bottom: 28px;
+  margin-bottom: 36px;
+  border-bottom: 1px solid var(--border);
+}
+
+.chapter-eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+
+.book-card.chapter-first .chapter-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.55;
+}
+
+/* ── Continuation page ── */
+.book-card.chapter-cont .chapter-header {
+  padding-bottom: 14px;
+  margin-bottom: 28px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.book-card.chapter-cont .chapter-title {
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+/* ── Page text ── */
+.page-text {
+  flex: 1;
+  line-height: 1.97;
+  color: var(--text);
+  word-break: keep-all;
+  overflow-wrap: break-word;
+  /* Prevent text selection on swipe */
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.page-text p {
+  margin-bottom: 1.1em;
+}
+
+.page-text p:last-child {
+  margin-bottom: 0;
+}
+
+/* ── Controls ── */
+.controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px;
+}
+
+.nav-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.font-group {
+  display: flex;
+  gap: 6px;
+}
+
+.btn {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  /* Minimum tap target on all devices */
+  min-height: 44px;
+  min-width: 44px;
+}
+
+.nav-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.first-btn {
+  font-size: 14px;
+}
+
+.nav-btn:hover:not(:disabled),
+.nav-btn:active:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.nav-btn:disabled {
+  opacity: 0.28;
+  cursor: default;
+}
+
+.page-indicator {
+  font-size: 12px;
+  color: var(--muted);
+  min-width: 88px;
+  text-align: center;
+  letter-spacing: 0.04em;
+}
+
+.size-btn {
+  padding: 0 12px;
+  height: 44px;
+  border-radius: 3px;
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.size-btn:hover,
+.size-btn:active {
+  background: var(--border);
+  color: var(--text);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   MOBILE — full-width, true page experience
+   ═══════════════════════════════════════════════════════════ */
+@media (max-width: 600px) {
+
+  /* Lock the viewport — no body scroll on reading pages */
+  body {
+    padding: 0;
+    height: 100vh;
+    height: 100dvh;       /* dynamic viewport (hides browser chrome) */
+    overflow: hidden;
+    align-items: stretch; /* reader-wrapper fills full width */
+  }
+
+  .reader-wrapper {
+    max-width: 100%;
+    height: 100%;
+    gap: 0;
+  }
+
+  /* ── Book card: fills remaining height, no scroll (reading pages) ── */
+  .book-card {
+    flex: 1;
+    min-height: 0;        /* allow flex to constrain height */
+    border-radius: 0;
+    box-shadow: none;
+    padding: 32px 22px 20px;
+    overflow: hidden;     /* reading pages never scroll */
+  }
+
+  /* ── TOC exception: allow internal scroll ── */
+  .book-card.toc {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 8px;
+  }
+
+  /* ── Cover ── */
+  .book-card.cover {
+    padding: 40px 24px;
+    justify-content: center;
+  }
+
+  .cover-genre {
+    margin-bottom: 24px;
+  }
+
+  .cover-title {
+    font-size: 22px;
+  }
+
+  .cover-author {
+    font-size: 13px;
+    margin-bottom: 32px;
+  }
+
+  .cover-divider {
+    margin-bottom: 28px;
+  }
+
+  .cover-quote {
+    font-size: 15px;
+    max-width: 100%;
+    line-height: 1.9;
+  }
+
+  /* ── Chapter first page ── */
+  .book-card.chapter-first .chapter-header {
+    padding-bottom: 20px;
+    margin-bottom: 24px;
+  }
+
+  .book-card.chapter-first .chapter-title {
+    font-size: 18px;
+  }
+
+  /* ── Chapter continuation ── */
+  .book-card.chapter-cont .chapter-header {
+    padding-bottom: 12px;
+    margin-bottom: 20px;
+  }
+
+  /* ── TOC entries ── */
+  .toc-header {
+    font-size: 14px;
+    padding-bottom: 16px;
+    margin-bottom: 12px;
+  }
+
+  .toc-entry {
+    padding: 10px 0;
+    min-height: 48px;     /* generous touch target in list */
+  }
+
+  .toc-entry-title {
+    font-size: 13px;
+  }
+
+  .toc-ch {
+    width: 34px;
+    font-size: 9px;
+  }
+
+  /* ── Controls bar: fixed-height strip at the bottom ── */
+  .controls {
+    flex-direction: row;  /* always stay in one row on mobile */
+    flex-shrink: 0;
+    height: 60px;
+    padding: 0 16px;
+    background: var(--card-bg);
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -2px 8px rgba(0,0,0,0.05);
+  }
+
+  .nav-group {
+    gap: 6px;
+  }
+
+  .page-indicator {
+    min-width: 68px;
+    font-size: 11px;
+  }
+
+  .nav-btn {
+    width: 44px;
+    height: 44px;
+    font-size: 17px;
+  }
+
+  .size-btn {
+    padding: 0 12px;
+    font-size: 12px;
+  }
+
+  .font-group {
+    gap: 4px;
+  }
+}
