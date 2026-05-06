@@ -524,9 +524,10 @@ let ttsLoadingSection = -1;        // section idx whose audio is being fetched
 
 // ── External-API engine settings (ElevenLabs) ─────────────────
 const TTS_API_DEFAULTS = {
-  // ElevenLabs default voice — calm, soft female; multilingual_v2
-  // handles Korean naturally. Users can override in settings.
-  voiceId: 'EXAVITQu4vr4xnSDxMaL',  // "Bella"
+  // Calm male narrator from ElevenLabs' default library — well suited
+  // for meditation / audiobook reading. eleven_multilingual_v2 carries
+  // the timbre into Korean naturally. Users can override in settings.
+  voiceId: 'pqHfZKP75CvOlQylNhV4',  // "Bill" — calm, mature narrator (male)
   modelId: 'eleven_multilingual_v2'
 };
 
@@ -647,9 +648,12 @@ async function fetchElevenLabsAudio(text) {
       text,
       model_id: TTS_API_DEFAULTS.modelId,
       voice_settings: {
-        stability:        0.55,   // a touch of expressiveness
-        similarity_boost: 0.78,
-        style:            0.18,   // gentle warmth without theatrics
+        // Tuned for calm, warm, natural Korean narration with the male
+        // voice — slightly higher style for less robotic delivery,
+        // higher similarity to keep the voice grounded.
+        stability:         0.5,
+        similarity_boost:  0.85,
+        style:             0.35,
         use_speaker_boost: true
       }
     })

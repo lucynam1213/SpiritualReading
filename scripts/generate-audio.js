@@ -150,9 +150,12 @@ async function generateAudio({ apiKey, voiceId, modelId, text }) {
       text,
       model_id: modelId,
       voice_settings: {
-        stability:        0.55,
-        similarity_boost: 0.78,
-        style:            0.18,
+        // Tuned for calm, warm, natural Korean narration with the male
+        // voice — slightly higher style for less robotic delivery,
+        // higher similarity to keep the voice grounded.
+        stability:         0.5,
+        similarity_boost:  0.85,
+        style:             0.35,
         use_speaker_boost: true
       }
     })
