@@ -9,6 +9,28 @@
 
 const CHARS_PER_PAGE = 450; // Desktop page length. Mobile uses ~60% of this automatically.
 
+// Printed-book page anchors: section title → first printed page of that section
+const PAGE_ANCHORS = {
+  "마음에서 들려오는 사랑의 소리":            1,
+  "머리말":                                   7,
+  "이 책을 읽는 독자들에게":                 15,
+  "절망을 두려워하지 말라":                 17,
+  "하느님의 약속을 굳게 믿어라":            18,
+  "진정한 자아를 찾아라":                   20,
+  "마음에서 들려오는 소리에 귀를 기울여라": 21,
+  "하느님께 의지하라":                      22,
+  "삶의 토대로 되돌아가라":                 23,
+  "사랑에는 한계가 있다":                   25,
+  "사랑의 신비를 알라":                     27,
+  "귀향":                                    28,
+  "다른 사람들의 한계를 이해하라":          29,
+  "하나가 되는 곳이 있음을 믿어라":         30,
+  "직관을 믿어라":                          32,
+  "자신의 몸을 아끼고 사랑하라":            35,
+  "새로운 나라로 들어가라":                 37,
+};
+const BOOK_END_PAGE = 41; // One past the last printed page (for final-section target).
+
 const sections = [
   {
     type: "cover",
@@ -215,20 +237,32 @@ function getCharsPerPage() {
 
 let allPages = [];
 let currentPage = 0;
+let totalPrintedPages = 0;
 let fontSize = parseInt(localStorage.getItem('ebook_font_size') || '17');
+
+// Distribute paragraphs evenly across targetN digital pages.
+function splitParasIntoPages(paragraphs, targetN) {
+  const n = Math.min(targetN, paragraphs.length);
+  if (n <= 1) return [paragraphs];
+  return Array.from({ length: n }, (_, i) => {
+    const from = Math.round(i * paragraphs.length / n);
+    const to   = Math.round((i + 1) * paragraphs.length / n);
+    return paragraphs.slice(from, to);
+  }).filter(g => g.length > 0);
+}
 
 function buildPages() {
   allPages = [];
-  const charsPerPage = getCharsPerPage();
   const sectionStartIndices = []; // page index before TOC insertion
 
-  // Assign chapter numbers to "chapter" sections
+  // Assign chapter numbers and printed-page start to each section
   let chapterCounter = 0;
   sections.forEach(s => {
     s.chapterNum = s.type === 'chapter' ? ++chapterCounter : null;
+    s.startPage  = PAGE_ANCHORS[s.title] || 1;
   });
 
-  // Paginate each section
+  // Paginate each section using printed-page anchors
   sections.forEach((section, sectionIdx) => {
     sectionStartIndices.push(allPages.length);
 
@@ -237,35 +271,37 @@ function buildPages() {
       .map(p => p.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim())
       .filter(p => p.length > 0);
 
-    const sectionPages = [];
-    let currentParas = [];
-    let currentLen = 0;
+    // Cover is always exactly 1 page; other sections use printed-page gaps.
+    let targetPages;
+    if (section.type === 'cover') {
+      targetPages = 1;
+    } else {
+      const nextSection = sections[sectionIdx + 1];
+      targetPages = Math.max(1, nextSection
+        ? nextSection.startPage - section.startPage
+        : BOOK_END_PAGE - section.startPage);
+    }
 
-    paragraphs.forEach(para => {
-      if (currentLen > 0 && currentLen + para.length > charsPerPage) {
-        sectionPages.push(currentParas.join('\n\n'));
-        currentParas = [para];
-        currentLen = para.length;
-      } else {
-        currentParas.push(para);
-        currentLen += para.length;
-      }
-    });
-    if (currentParas.length > 0) sectionPages.push(currentParas.join('\n\n'));
+    const paraGroups = splitParasIntoPages(paragraphs, targetPages);
 
-    sectionPages.forEach((text, pageIdx) => {
+    paraGroups.forEach((group, pageIdx) => {
       allPages.push({
         sectionTitle: section.title,
         sectionType:  section.type,
         chapterNum:   section.chapterNum,
-        text,
-        isCover:    section.type === 'cover',
-        isFirstPage: pageIdx === 0,
+        text:         group.join('\n\n'),
+        isCover:      section.type === 'cover',
+        isFirstPage:  pageIdx === 0,
         sectionIdx,
-        pageIdx
+        pageIdx,
+        displayPage:  section.startPage + pageIdx,  // printed page number
       });
     });
   });
+
+  // Record total printed pages for the page indicator
+  const lastContent = allPages[allPages.length - 1];
+  totalPrintedPages = lastContent ? lastContent.displayPage : allPages.length;
 
   // Build TOC entries — after insertion, every non-cover section shifts +1
   const tocEntries = sections
@@ -275,8 +311,9 @@ function buildPages() {
         sectionTitle: section.title,
         sectionType:  section.type,
         chapterNum:   section.chapterNum,
-        sectionIdx:   i,                     // for TTS "now playing" highlight
-        pageIdx: sectionStartIndices[i] + 1  // +1 for TOC page inserted at index 1
+        sectionIdx:   i,                          // for TTS "now playing" highlight
+        pageIdx:     sectionStartIndices[i] + 1,  // +1 for TOC page inserted at index 1
+        displayPage: section.startPage,           // printed page number shown in TOC
       };
     })
     .filter(Boolean);
@@ -322,7 +359,11 @@ function renderPage(idx) {
   }, 180);
 
   currentPage = idx;
-  document.getElementById('pageIndicator').textContent = `Page ${idx + 1} of ${allPages.length}`;
+  if (page.isToc) {
+    document.getElementById('pageIndicator').textContent = '목차';
+  } else {
+    document.getElementById('pageIndicator').textContent = `Page ${page.displayPage} of ${totalPrintedPages}`;
+  }
   document.getElementById('prevBtn').disabled  = idx === 0;
   document.getElementById('nextBtn').disabled  = idx === allPages.length - 1;
   document.getElementById('firstBtn').disabled = idx === 0;
@@ -355,7 +396,7 @@ function renderToc(card, page) {
       <span class="toc-ch"></span>
       <span class="toc-entry-title is-front">${e.sectionTitle}</span>
       <button class="toc-tts-btn" data-section="${e.sectionIdx}" aria-label="이 장 듣기" title="이 장 듣기">&#9654;</button>
-      <span class="toc-page-num">${e.pageIdx + 1}</span>
+      <span class="toc-page-num">${e.displayPage}</span>
     </div>
   `).join('');
 
@@ -364,7 +405,7 @@ function renderToc(card, page) {
       <span class="toc-ch">Ch.${e.chapterNum}</span>
       <span class="toc-entry-title">${e.sectionTitle}</span>
       <button class="toc-tts-btn" data-section="${e.sectionIdx}" aria-label="이 장 듣기" title="이 장 듣기">&#9654;</button>
-      <span class="toc-page-num">${e.pageIdx + 1}</span>
+      <span class="toc-page-num">${e.displayPage}</span>
     </div>
   `).join('');
 
