@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ebook Admin</title>
+  <link rel="stylesheet" href="admin.css">
+</head>
+<body>
+
+  <header class="admin-header">
+    <div class="header-left">
+      <span class="header-icon">📖</span>
+      <span class="header-title">Ebook Admin</span>
+    </div>
+    <div class="header-badge">Local Only &middot; Read-only access to ebook data</div>
+  </header>
+
+  <div class="admin-body">
+
+    <!-- ── LEFT: Form ───────────────────────────────── -->
+    <section class="panel form-panel">
+
+      <div class="panel-header">
+        <h2 id="formHeading">Select a chapter</h2>
+        <span id="formStatus" class="status-tag" aria-live="polite"></span>
+      </div>
+
+      <div class="form-group">
+        <label for="fType">Type</label>
+        <select id="fType">
+          <option value="cover">cover</option>
+          <option value="front">front</option>
+          <option value="chapter" selected>chapter</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="fTitle">Title</label>
+        <input type="text" id="fTitle" placeholder="Chapter title (Korean or English)">
+      </div>
+
+      <div class="form-group">
+        <label for="fStartPage">Start Page <span class="label-hint">printed book page number</span></label>
+        <input type="number" id="fStartPage" min="1" placeholder="e.g. 17">
+      </div>
+
+      <div class="form-group">
+        <label for="fAudio">Audio File <span class="label-hint">from audio/ folder</span></label>
+        <select id="fAudio">
+          <option value="">— None —</option>
+        </select>
+      </div>
+
+      <div class="form-group content-group">
+        <label for="fContent">Content <span class="label-hint">separate paragraphs with a blank line</span></label>
+        <textarea id="fContent" rows="16" placeholder="Paste or type chapter text here..."></textarea>
+      </div>
+
+      <div class="form-actions">
+        <button class="btn btn-primary" id="btnSaveDraft">💾 Save Draft</button>
+        <button class="btn btn-ghost" id="btnAddNew">＋ New Chapter</button>
+        <button class="btn btn-ghost" id="btnReset">Reset Form</button>
+      </div>
+
+      <div class="draft-info" id="draftInfo" hidden></div>
+
+    </section>
+
+    <!-- ── RIGHT: Chapter list ──────────────────────── -->
+    <section class="panel list-panel">
+
+      <div class="panel-header">
+        <h2>Sections <span class="count-badge" id="chapterCount">0</span></h2>
+        <button class="btn btn-sm" id="btnLoadDraft">Load Draft</button>
+      </div>
+
+      <div class="list-hint">Click any row to edit it in the form.</div>
+      <div class="chapter-list" id="chapterList"></div>
+
+    </section>
+
+  </div><!-- /.admin-body -->
+
+  <!-- ── OUTPUT ───────────────────────────────────────── -->
+  <section class="output-section">
+
+    <div class="output-header">
+      <div class="output-header-left">
+        <h2>Generated Output</h2>
+        <p class="output-hint">
+          Click <strong>Generate Updated Data</strong>, then copy the result and
+          paste it manually into <code>script.js</code> — replacing the existing
+          <code>sections</code>, <code>PAGE_ANCHORS</code>, and <code>BOOK_END_PAGE</code> blocks.
+        </p>
+      </div>
+      <div class="output-actions">
+        <button class="btn btn-primary" id="btnGenerate">⚙ Generate Updated Data</button>
+        <button class="btn btn-ghost" id="btnCopy" disabled>Copy to Clipboard</button>
+      </div>
+    </div>
+
+    <textarea id="outputArea" readonly spellcheck="false"
+      placeholder="Generated JavaScript will appear here after you click Generate Updated Data..."></textarea>
+
+  </section>
+
+  <!--
+    Load ebook data from script.js (READ-ONLY).
+    DOM errors caused by missing ebook elements are suppressed;
+    the sections[], PAGE_ANCHORS, and BOOK_END_PAGE globals are
+    all we need and are defined before any DOM code runs.
+  -->
+  <script>window.onerror = () => true;</script>
+  <script src="script.js"></script>
+  <script>window.onerror = null;</script>
+  <script src="admin.js"></script>
+
+</body>
+</html>
