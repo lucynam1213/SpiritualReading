@@ -1,13 +1,15 @@
 // ============================================================
 // EBOOK ADMIN — admin.js
 //
-// Local-only admin panel. All ebook data is read from the
-// globals (sections, PAGE_ANCHORS, BOOK_END_PAGE) that
-// script.js exposes — admin.js never writes to any file.
-//
+// Reads ebook data from script.js globals (read-only).
 // Drafts are saved to localStorage only.
-// The "Generate Updated Data" button produces copyable JS;
-// paste it manually into script.js when you're ready.
+// "Generate Updated Data" produces copyable JS.
+// "Save to GitHub" uses the GitHub Contents API to commit
+//   only the data blocks in script.js — nothing else changes.
+//
+// SECURITY: The GitHub token is held only in a JS variable
+// for the duration of the API call. It is NEVER written to
+// localStorage, sessionStorage, the DOM, or any log output.
 // ============================================================
 
 // ── Audio files present in audio/ folder ───────────────────
@@ -33,6 +35,17 @@ const KNOWN_AUDIO_FILES = [
 
 const DRAFT_KEY    = 'ebook_admin_draft_v1';
 const BOOK_END_DEF = 41; // default BOOK_END_PAGE when not overridden
+
+// ── GitHub API config (no secrets here) ────────────────────
+const GH_OWNER  = 'lucynam1213';
+const GH_REPO   = 'SpiritualReading';
+const GH_BRANCH = 'main';
+const GH_FILE   = 'script.js';
+// Markers that bracket the replaceable data block in script.js.
+// Everything between these two lines is overwritten; everything
+// outside is preserved byte-for-byte.
+const GH_BLOCK_START = 'const CHARS_PER_PAGE ='; // line kept; replacement starts AFTER it
+const GH_BLOCK_END   = '// PAGINATION ENGINE '; // line kept; replacement ends BEFORE it
 
 // ── State ──────────────────────────────────────────────────
 let adminSections = [];   // working copy — editable
@@ -354,6 +367,231 @@ function fallbackCopy(area, btn) {
   }
 }
 
+// ── GitHub save ─────────────────────────────────────────────
+
+// UTF-8–safe base64 encode/decode (handles Korean characters correctly).
+function base64ToUtf8(b64) {
+  const bytes = Uint8Array.from(atob(b64.replace(/\n/g, '')), c => c.charCodeAt(0));
+  return new TextDecoder('utf-8').decode(bytes);
+}
+
+function utf8ToBase64(str) {
+  const bytes = new TextEncoder().encode(str);
+  let binary = '';
+  bytes.forEach(b => binary += String.fromCharCode(b));
+  return btoa(binary);
+}
+
+// Fetch the current script.js from GitHub and return { sha, content }.
+async function fetchScriptJs(token) {
+  const url = `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${GH_FILE}`;
+  const res = await fetch(url, {
+    headers: {
+      'Authorization':        `Bearer ${token}`,
+      'Accept':               'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`GitHub API ${res.status}: ${err.message || res.statusText}`);
+  }
+  const data = await res.json();
+  return { sha: data.sha, content: base64ToUtf8(data.content) };
+}
+
+// Commit newContent back to GitHub as script.js.
+async function commitScriptJs(token, newContent, sha) {
+  const url = `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${GH_FILE}`;
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: {
+      'Authorization':        `Bearer ${token}`,
+      'Accept':               'application/vnd.github+json',
+      'Content-Type':         'application/json',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+    body: JSON.stringify({
+      message: 'Update ebook chapters from admin page',
+      content: utf8ToBase64(newContent),
+      sha,
+      branch: GH_BRANCH,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`GitHub API ${res.status}: ${err.message || res.statusText}`);
+  }
+  return res.json();
+}
+
+// Find the replaceable block in the original script.js and swap in
+// freshly generated PAGE_ANCHORS + BOOK_END_PAGE + sections content.
+function buildReplacedContent(original) {
+  // Find the end of the CHARS_PER_PAGE line (replacement starts on the next line).
+  const startLineIdx = original.indexOf('\n', original.indexOf(GH_BLOCK_START));
+  if (startLineIdx === -1) {
+    throw new Error('Could not locate CHARS_PER_PAGE line in script.js.\nIs this the right file?');
+  }
+
+  // Find the PAGINATION ENGINE comment line (replacement ends just before it).
+  const endIdx = original.indexOf(GH_BLOCK_END);
+  if (endIdx === -1) {
+    throw new Error('Could not locate PAGINATION ENGINE comment in script.js.\nIs this the right file?');
+  }
+  // Walk back to the start of that line so we don't cut mid-comment.
+  const endLineIdx = original.lastIndexOf('\n', endIdx) + 1;
+
+  if (startLineIdx >= endLineIdx) {
+    throw new Error('Marker positions are inverted — file structure may have changed.');
+  }
+
+  // Build the new data block.
+  const newBlock = buildDataBlock();
+
+  return original.slice(0, startLineIdx + 1)
+    + '\n'
+    + newBlock
+    + '\n'
+    + original.slice(endLineIdx);
+}
+
+// Generate the PAGE_ANCHORS + BOOK_END_PAGE + sections JS string.
+function buildDataBlock() {
+  // PAGE_ANCHORS
+  const anchorLines = Object.entries(adminAnchors)
+    .map(([title, page]) => `  ${JSON.stringify(title)}: ${page},`)
+    .join('\n');
+  const anchorsBlock = `// Printed-book page anchors: section title → first printed page of that section\nconst PAGE_ANCHORS = {\n${anchorLines}\n};`;
+
+  const endPageBlock = `const BOOK_END_PAGE = ${adminEndPage}; // One past the last printed page (for final-section target).`;
+
+  // sections[]
+  const sectionItems = adminSections.map(s => {
+    const safeContent = (s.content || '')
+      .replace(/\\/g,  '\\\\')
+      .replace(/`/g,   '\\`')
+      .replace(/\$\{/g, '\\${');
+    return (
+      `  {\n` +
+      `    type: ${JSON.stringify(s.type)},\n` +
+      `    title: ${JSON.stringify(s.title)},\n` +
+      `    content: \`${safeContent}\`\n` +
+      `  }`
+    );
+  });
+  const sectionsBlock = `const sections = [\n${sectionItems.join(',\n')}\n];`;
+
+  return [anchorsBlock, endPageBlock, '', sectionsBlock].join('\n');
+}
+
+// Sanity-check that the replacement didn't accidentally remove critical JS.
+function verifySafety(original, updated) {
+  const mustExist = [
+    'function buildPages(',
+    'function renderPage(',
+    'function renderCover(',
+    'function renderToc(',
+    'function splitParasIntoPages(',
+    'speechSynthesis',
+    'ElevenLabs',
+    'ttsPlayBtn',
+  ];
+  const missing = mustExist.filter(fn => !updated.includes(fn));
+  if (missing.length > 0) {
+    throw new Error(
+      `Safety check failed — these required functions/strings are missing from the updated file:\n` +
+      missing.map(m => `  • ${m}`).join('\n') +
+      `\n\nThe save was cancelled. No changes were made.`
+    );
+  }
+  // Size sanity: updated file should be within 50 %–200 % of original
+  const ratio = updated.length / original.length;
+  if (ratio < 0.5 || ratio > 2) {
+    throw new Error(
+      `Safety check failed: updated file is ${Math.round(ratio * 100)}% the size of the original.\n` +
+      `This seems wrong. The save was cancelled.`
+    );
+  }
+}
+
+// GitHub status UI helpers.
+function setGhStatus(html, type) {
+  const el = document.getElementById('ghStatus');
+  el.innerHTML = html;
+  el.className = `gh-status gh-${type}`;
+  el.hidden = false;
+}
+
+function clearGhStatus() {
+  const el = document.getElementById('ghStatus');
+  el.hidden = true;
+  el.className = 'gh-status';
+}
+
+function setGhBtnLoading(loading) {
+  const btn = document.getElementById('btnSaveGitHub');
+  btn.disabled = loading;
+  btn.textContent = loading ? '⏳ Saving…' : '⬆ Save to GitHub';
+}
+
+// Main save-to-GitHub flow.
+async function saveToGitHub() {
+  const token = document.getElementById('ghToken').value.trim();
+
+  if (!token) {
+    setGhStatus('Please paste your GitHub Personal Access Token first.', 'err');
+    return;
+  }
+  if (adminSections.length === 0) {
+    setGhStatus('No sections to save — load ebook data first.', 'err');
+    return;
+  }
+
+  const confirmed = confirm(
+    'Save chapters to GitHub?\n\n' +
+    'Repository : lucynam1213/SpiritualReading\n' +
+    'File       : script.js\n' +
+    'Branch     : main\n\n' +
+    'Only the sections[], PAGE_ANCHORS, and BOOK_END_PAGE\n' +
+    'data blocks will be replaced. All audio logic, design,\n' +
+    'and TTS code is preserved unchanged.\n\n' +
+    'Continue?'
+  );
+  if (!confirmed) return;
+
+  clearGhStatus();
+  setGhBtnLoading(true);
+
+  try {
+    // 1. Fetch current file + SHA from GitHub
+    setGhStatus('Fetching current script.js from GitHub…', 'loading');
+    const { sha, content: original } = await fetchScriptJs(token);
+
+    // 2. Build updated content
+    const updated = buildReplacedContent(original);
+
+    // 3. Run safety checks before committing
+    verifySafety(original, updated);
+
+    // 4. Commit to GitHub
+    setGhStatus('Uploading changes to GitHub…', 'loading');
+    const result = await commitScriptJs(token, updated, sha);
+
+    const commitUrl = result.commit?.html_url ||
+      `https://github.com/${GH_OWNER}/${GH_REPO}/commits/${GH_BRANCH}`;
+    setGhStatus(
+      `✓ Saved successfully! &nbsp;<a href="${commitUrl}" target="_blank" rel="noopener noreferrer">View commit on GitHub →</a>`,
+      'ok'
+    );
+
+  } catch (err) {
+    setGhStatus(`✗ ${escHtml(err.message)}`, 'err');
+  } finally {
+    setGhBtnLoading(false);
+  }
+}
+
 // ── Utilities ───────────────────────────────────────────────
 function escHtml(str) {
   return String(str)
@@ -375,6 +613,7 @@ function bindEvents() {
   document.getElementById('btnLoadDraft').addEventListener('click', loadDraft);
   document.getElementById('btnGenerate').addEventListener('click', generateOutput);
   document.getElementById('btnCopy').addEventListener('click', copyOutput);
+  document.getElementById('btnSaveGitHub').addEventListener('click', saveToGitHub);
 
   // Track unsaved changes
   ['fType','fTitle','fStartPage','fAudio','fContent'].forEach(id => {

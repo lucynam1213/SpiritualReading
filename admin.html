@@ -13,7 +13,7 @@
       <span class="header-icon">📖</span>
       <span class="header-title">Ebook Admin</span>
     </div>
-    <div class="header-badge">Local Only &middot; Read-only access to ebook data</div>
+    <div class="header-badge">GitHub-connected &middot; Token never stored</div>
   </header>
 
   <div class="admin-body">
@@ -102,6 +102,62 @@
 
     <textarea id="outputArea" readonly spellcheck="false"
       placeholder="Generated JavaScript will appear here after you click Generate Updated Data..."></textarea>
+
+  </section>
+
+  <!-- ── GITHUB SAVE ──────────────────────────────────────── -->
+  <section class="gh-section">
+
+    <div class="gh-header">
+      <div class="gh-header-left">
+        <h2>Save to GitHub</h2>
+        <p class="gh-hint">
+          Paste your GitHub Personal Access Token below. It is used only for this
+          request and is <strong>never stored, logged, or committed</strong> — it
+          lives only in memory and disappears when you close or refresh the page.
+        </p>
+      </div>
+    </div>
+
+    <div class="gh-form">
+
+      <div class="gh-field">
+        <label for="ghToken">
+          Personal Access Token
+          <span class="label-hint">fine-grained · Contents: Read &amp; Write</span>
+        </label>
+        <input type="password" id="ghToken" placeholder="github_pat_…"
+               autocomplete="off" spellcheck="false">
+      </div>
+
+      <div class="gh-meta">
+        <div class="gh-meta-item">
+          <span class="gh-meta-label">Repository</span>
+          <code>lucynam1213 / SpiritualReading</code>
+        </div>
+        <div class="gh-meta-item">
+          <span class="gh-meta-label">Branch</span>
+          <code>main</code>
+        </div>
+        <div class="gh-meta-item">
+          <span class="gh-meta-label">File</span>
+          <code>script.js</code>
+        </div>
+        <div class="gh-meta-item">
+          <span class="gh-meta-label">Replaces</span>
+          <code>sections · PAGE_ANCHORS · BOOK_END_PAGE only</code>
+        </div>
+      </div>
+
+      <div class="gh-actions">
+        <button class="btn btn-github" id="btnSaveGitHub">
+          ⬆ Save to GitHub
+        </button>
+      </div>
+
+    </div>
+
+    <div id="ghStatus" class="gh-status" hidden></div>
 
   </section>
 
