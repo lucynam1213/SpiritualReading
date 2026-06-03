@@ -31,6 +31,9 @@ const KNOWN_AUDIO_FILES = [
   'audio/14.mp3',
   'audio/15.mp3',
   'audio/16.mp3',
+  'audio/17.mp3',
+  'audio/18.mp3',
+  'audio/19.mp3',
 ];
 
 const DRAFT_KEY    = 'ebook_admin_draft_v1';
